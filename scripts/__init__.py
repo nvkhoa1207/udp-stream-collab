@@ -1,0 +1,1 @@
+"""BTL collaboration starter package."""

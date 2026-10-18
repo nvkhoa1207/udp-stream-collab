@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BTL collaboration — khung UI</title>
+</head>
+<body>
+  <h1>Chat và gửi file trong LAN</h1>
+  <p><strong>KHUNG UI / DỮ LIỆU GIẢ — chưa kết nối mạng.</strong></p>
+  <!-- TODO[K6]: thêm login, trạng thái/lỗi và bridge theo ui/README.md. -->
+  <h2>Người dùng</h2>
+  <ul id="users"></ul>
+  <label for="recipient">Người nhận</label>
+  <select id="recipient"><option value="*">Chat chung</option></select>
+  <h2>Tin nhắn</h2>
+  <ul id="messages" aria-live="polite"></ul>
+  <label for="message">Nội dung</label>
+  <input id="message" type="text">
+  <button id="send-message" type="button" disabled>Gửi — TODO K2/K6</button>
+  <h2>Gửi file</h2>
+  <input id="file" type="file" aria-label="Chọn file">
+  <button id="send-file" type="button" disabled>Gửi file — TODO K4/K6</button>
+  <progress id="progress" value="0" max="100" aria-label="Tiến độ gửi file"></progress>
+  <p id="status">Chưa có kết nối hoặc dữ liệu truyền thật.</p>
+  <script src="app.js"></script>
+</body>
+</html>

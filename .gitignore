@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+.env
+data/*
+!data/README.md
+*.key
+*.pem
+*.p12
+*.part
