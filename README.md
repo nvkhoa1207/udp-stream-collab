@@ -9,15 +9,18 @@ file tin cậy qua UDP. Nhóm tự xây giao thức ứng dụng, cơ chế xác
 
 **Thành viên: Nguyễn Việt Khoa và Hải.**
 
-> Dự án đang phát triển. Bảng tiến độ bên dưới mô tả code đã push lên GitHub,
-> không đại diện cho toàn bộ code đang có trên máy của từng thành viên.
-> Hiện chưa có bản chạy mạng đầu-cuối để nghiệm thu hoặc nộp bài.
+**Cập nhật yêu cầu: 21/10/2026**, theo phản hồi giảng viên do Khoa cung cấp.
+
+> Dự án đang phát triển. Bảng tiến độ GitHub bên dưới là kết quả kiểm tra ngày
+> 19/10/2026; chưa đối chiếu lại repository trong lần cập nhật README này.
+> Code cục bộ có thể mới hơn. Kiến trúc dự kiến không đồng nghĩa với tính năng
+> đã triển khai hoặc đã nghiệm thu.
 
 ## Phân công
 
 | Thành viên | Phần phụ trách chính |
 |---|---|
-| **Hải** | Codec chung; server; đăng nhập/session/online; định tuyến; UDP socket; sequence, ACK, timeout, gửi lại; flow control và congestion control |
+| **Hải** | Codec chung; server TCP/UDP; đăng nhập/session/online; định tuyến; sequence, ACK, timeout, gửi lại; flow control và congestion control đơn giản hóa |
 | **Khoa** | Client service; chat; chia/ghép file, metadata và SHA-256; hàng đợi sự kiện; giao diện HTTP/JavaScript; phối hợp phần bảo mật |
 | **Cả hai** | Thống nhất giao thức/API; ghép module; kiểm thử mạng; báo cáo và demo |
 
@@ -25,7 +28,7 @@ Trong các TODO và comment cũ, **A / Bạn A là Hải**, còn **K / Khoa là 
 File [TODO_BAN_A.md](TODO_BAN_A.md) vẫn giữ tên hiện tại để các liên kết không bị
 đứt. Danh sách của Khoa nằm ở [TODO_KHOA.md](TODO_KHOA.md).
 
-## Tiến độ trên GitHub
+## Tiến độ tại lần kiểm tra GitHub gần nhất
 
 Mốc kiểm tra: **19/10/2026**.
 
@@ -41,49 +44,73 @@ Mốc kiểm tra: **19/10/2026**.
 | Giao diện | Có HTML/JS với dữ liệu mẫu; HTTP bridge chưa triển khai |
 | Mã hóa payload | Chưa triển khai |
 
-**Tiến độ cục bộ do Khoa cung cấp:** đã làm và chạy thử `FileReceiver`, gửi/nhận
-chat qua mock và hàng đợi sự kiện, nhưng chưa push đầy đủ. Các phần này cần được
-đồng bộ rồi kiểm tra lại trước khi đánh dấu hoàn thành trên GitHub.
+**Tiến độ cục bộ:** Khoa đã cung cấp code `FileReceiver` gồm `begin()`,
+`accept_chunk()` và `finish()`, có ghi file tạm, theo dõi chunk trùng và kiểm tra
+kích thước/hash. Theo thông tin Khoa cung cấp, phần này cùng chat qua mock và
+hàng đợi sự kiện đã được chạy thử cục bộ, nhưng chưa push đầy đủ. Cần đồng bộ
+code và kết quả chạy trước khi cập nhật trạng thái trên GitHub.
 
 Demo chia file hiện tại ghi nối tiếp theo thứ tự; nó **không gọi
 `FileReceiver`**. Demo mock tạo và chuyển `Packet` trực tiếp; nó **không gọi
 `ClientService`**, không mở socket và không kiểm tra mất gói UDP.
 
-## Yêu cầu và hướng triển khai
+## Yêu cầu đã xác nhận với giảng viên
 
-Theo đề BTL và phản hồi giảng viên do nhóm cung cấp:
+Phần này ghi nhận phản hồi giảng viên do Khoa cung cấp; cách chia vai trò cho
+từng giao thức nằm ở mục kiến trúc bên dưới.
 
-- **UDP là nền tảng truyền dữ liệu chat/file.** Nhóm tự bổ sung reliability,
-  flow control và congestion control.
+- **Phải sử dụng cả TCP và UDP.** Phần chat/truyền file trên UDP vẫn cần tự bổ
+  sung reliability, flow control và congestion control theo yêu cầu BTL.
+- **Giao diện được dùng thư viện JavaScript tùy chọn.** Giảng viên không đặt
+  nặng hình thức; ưu tiên thao tác được và hiển thị đúng trạng thái. Vẫn giữ
+  giao diện HTTP/JavaScript theo yêu cầu đã trao đổi trước đó.
+- **Python được dùng thư viện, nhưng không dùng framework.** Nhóm ưu tiên
+  `socket`, `asyncio`, `json`, `pathlib`, `hashlib` và các thư viện cần thiết;
+  không dùng Flask, Django hoặc FastAPI.
+- **BBR/CUBIC được triển khai ở mức đơn giản.** Cần mô tả đúng thuật toán và
+  phần giản lược; không ghi là bản đầy đủ khi chưa triển khai đầy đủ.
 - Có xử lý nhiều client bằng async I/O hoặc thread; tách network, xử lý dữ liệu
   và giao diện. Mục tiêu nghiệm thu theo đề là 10–20 client đồng thời.
-- **Cần triển khai HTTP và giao diện JavaScript.** Không coi CLI hoặc trang
-  HTML tĩnh có dữ liệu mẫu là đã hoàn thành phần này.
-- Không dùng Flask/Django hoặc WebSockets để thay phần networking phải tự làm.
+- Không dùng WebSockets theo giới hạn networking trong đề. Thư viện giao diện
+  không thay thế phần truyền UDP và cơ chế tin cậy nhóm phải tự viết.
 - Giảng viên cho phép không triển khai mã hóa payload, nhưng vẫn cần các biện
   pháp bảo mật khác. AES-GCM có thể để sau; xác thực, kiểm tra phiên/quyền gửi,
   giới hạn đầu vào và bảo vệ đường dẫn file vẫn cần được thiết kế.
 - Ghi rõ thiết kế và phạm vi tính năng nhóm lựa chọn theo hướng dẫn giảng viên.
 
-**Ba chi tiết vẫn cần chốt:**
-
-1. Phạm vi HTTP: phương án HTTP server cục bộ nối UI với client UDP có đáp ứng
-   cách triển khai mà giảng viên yêu cầu hay không.
-2. Đề nêu BBR/CUBIC: cần chọn thuật toán và xác nhận mức triển khai. Cửa sổ cố
-   định hoặc chỉ có retry chưa đủ để gọi là BBR/CUBIC.
-3. Rubric còn bước handshake TCP: giữ riêng bước TCP này hay thay bằng handshake
-   UDP cần được xác nhận. Khung TCP hiện tại là phương án dự kiến.
-
-Các tài liệu TODO, protocol và UI trước đây còn giả định AES/TLS bắt buộc hoặc
-HTTP chưa bắt buộc. Khi triển khai, cập nhật chúng theo phản hồi mới và quyết
-định đã thống nhất; không coi mọi lựa chọn trong starter là yêu cầu của đề.
+Các tài liệu TODO, protocol và UI cũ có thể còn ghi TCP chưa chốt, giao diện
+đang chờ xác nhận hoặc AES/TLS bắt buộc. Khi triển khai, cập nhật các nội dung
+đó theo yêu cầu mới ở đây và lựa chọn thiết kế cụ thể của nhóm.
 
 ## Kiến trúc dự kiến
+
+**Phương án triển khai đề xuất:** TCP cho kết nối ban đầu/đăng nhập, UDP cho
+chat và file, HTTP cho giao diện. Đây là cách nhóm phân vai trò dựa trên yêu
+cầu có cả TCP và UDP, không phải lời giảng viên quy định chi tiết từng kênh.
+
+| Kênh | Giao thức và mục đích |
+|---|---|
+| Client Python ↔ server | TCP: handshake ứng dụng, đăng nhập và thiết lập phiên; cổng dự kiến 9000 |
+| Client Python ↔ server | UDP: chat, file, ACK, heartbeat và cập nhật online; cổng dự kiến 9001 |
+| Trình duyệt ↔ client Python cục bộ | HTTP trên TCP: phục vụ giao diện và gọi chức năng client; bridge chỉ nghe trên localhost, cổng riêng sẽ được cấu hình khi triển khai |
+
+Luồng sử dụng dự kiến:
+
+1. Trình duyệt mở giao diện do HTTP bridge cục bộ phục vụ.
+2. Giao diện gửi yêu cầu đăng nhập đến bridge; client trao đổi với server qua TCP.
+3. Sau khi xác thực, client gắn UDP endpoint với phiên theo giao thức chung.
+4. Chat và chunk file được truyền qua UDP; transport xử lý ACK, gửi lại và cửa sổ.
+5. Client nhận phân phối sự kiện để giao diện hiển thị tin nhắn, online, tiến độ
+   và lỗi. Có thể lấy sự kiện qua HTTP polling hoặc long-polling.
+
+UI ban đầu dùng HTML, CSS và JavaScript thuần để dễ đọc và dễ sửa. Có thể bổ
+sung thư viện JavaScript khi cần. Ưu tiên đăng nhập, chat chung/riêng, danh sách
+online, chọn file, tiến độ và trạng thái lỗi; phần trang trí làm sau.
 
 | Thành phần | Vai trò |
 |---|---|
 | `common/` | Mô hình packet, cấu hình, codec và giao diện transport dùng chung |
-| `server/` | Quản lý người dùng/phiên và chuyển tiếp chat/file tới người nhận |
+| `server/` | Nhận kết nối TCP, quản lý người dùng/phiên và chuyển tiếp chat/file qua UDP |
 | `transport/` | UDP tin cậy, ACK/retry, cửa sổ nhận/gửi và congestion control |
 | `client/` | Xử lý chat, điều phối truyền file, chia/ghép dữ liệu và phát sự kiện |
 | `ui/` | Hiển thị trạng thái, tin nhắn, online và tiến độ; kết nối HTTP với client |
@@ -111,6 +138,23 @@ Trước khi ghép cần thống nhất:
   thành stop-and-wait, nên cần số tác vụ gửi đồng thời có giới hạn.
 - ACK của server chỉ xác nhận chặng đến server. Chỉ báo file hoàn tất sau khi
   người nhận kiểm tra dữ liệu và trả `FILE_COMPLETE`.
+
+## Congestion control ở mức đơn giản
+
+Hướng đề xuất là **CUBIC đơn giản hóa**; Hải phụ trách chính, Khoa phối hợp
+ghép client và đo kết quả. Chưa coi thuật toán này là đã có trong code.
+
+- Theo dõi cửa sổ tắc nghẽn `cwnd` và lượng dữ liệu đang chờ ACK.
+- Giữ ý tưởng tăng cửa sổ theo hàm bậc ba của thời gian và giảm khi phát hiện mất
+  gói; có giới hạn cửa sổ và xử lý ACK trùng để tránh tính tăng nhiều lần.
+- Phối hợp với giới hạn nhận do flow control cung cấp. Nhiều stream dùng chung
+  đường truyền phải cùng chịu ngân sách gửi phù hợp.
+- Thử dưới các mức mất gói/độ trễ, ghi log cửa sổ, số lần gửi lại và thời gian
+  hoàn tất; báo cáo rõ phần đã làm và phần giản lược.
+
+Cửa sổ cố định, chỉ có timeout/retry hoặc chỉ tăng tuyến tính rồi giảm một nửa
+không đủ để gọi là CUBIC. Mức triển khai đơn giản giúp giảm phạm vi, nhưng vẫn
+cần thể hiện cơ chế điều chỉnh lượng dữ liệu gửi theo tình trạng truyền.
 
 ## Cài đặt và chạy phần hiện có
 
@@ -159,8 +203,9 @@ python -m server.main --help
 python -m client.main --help
 ```
 
-Hai lệnh `--help` chạy được. Chạy server/client thật hiện vẫn kết thúc với thông
-báo chưa triển khai. Cổng TCP 9000 và UDP 9001 là cấu hình dự kiến của nhóm.
+Ở bản code được kiểm tra ngày 19/10/2026, hai lệnh `--help` chạy được, còn chạy
+server/client thật kết thúc với thông báo chưa triển khai. Cổng TCP 9000 và UDP
+9001 là cấu hình dự kiến của nhóm; sẽ bổ sung lệnh chạy thật sau khi ghép xong.
 
 Các demo trên chỉ cần thư viện chuẩn. `requirements.txt` hiện có
 `cryptography`; chỉ cần cài khi triển khai phần dùng thư viện này:
@@ -169,7 +214,7 @@ Các demo trên chỉ cần thư viện chuẩn. `requirements.txt` hiện có
 python -m pip install -r requirements.txt
 ```
 
-## Kết quả kiểm tra hiện tại
+## Kết quả kiểm tra đã ghi nhận
 
 Trên bản code GitHub được kiểm tra ngày 19/10/2026:
 
@@ -189,8 +234,8 @@ mất DATA/ACK, gửi lại, flow/congestion control, nhiều client hay HTTP UI
 3. Hải hoàn thiện server/transport; Khoa nối `send_file()` và xử lý sự kiện.
 4. Ghép hai client qua server, thử chat và truyền file; sau đó thử mất gói,
    ACK mất/trùng, sai thứ tự, ngắt kết nối và nhiều stream đồng thời.
-5. Tích hợp HTTP UI theo phương án được chấp thuận; hoàn thiện bảo mật,
-   đo congestion control và thử 10–20 client.
+5. Tích hợp HTTP UI đơn giản; hoàn thiện các kiểm tra bảo mật, đo congestion
+   control đơn giản hóa và thử 10–20 client.
 6. Cập nhật hướng dẫn chạy thật, kết quả nghiệm thu và báo cáo theo code đã có.
 
 Lịch [TODO_5_NGAY.md](TODO_5_NGAY.md) là kế hoạch ban đầu, không phải cam kết
@@ -205,6 +250,11 @@ tiến độ hoặc bằng chứng chức năng đã hoàn thành.
 - [Định hướng UI](ui/README.md)
 - [Dàn ý báo cáo](reports/REPORT_OUTLINE.md)
 
+Bài tham khảo **“Implement non-blocking HTTP server and chat application”**
+(tháng 04/2026, nhóm 2, lớp CC02) hữu ích cho HTTP request/response, routing,
+session và async I/O. Bài đó mô tả chat P2P qua **TCP**, không phải cách triển
+khai UDP tin cậy của dự án này. Dùng báo cáo đó để học cách tổ chức HTTP và
+ứng dụng; yêu cầu của nhóm được đối chiếu với đề và phản hồi giảng viên ở trên.
 
 Khi nộp: chuẩn bị mã nguồn, README chạy được từ đầu và báo cáo PDF theo đề.
 Đề cho phép nộp ZIP hoặc liên kết repo GitHub private; kiểm tra lại hình thức
