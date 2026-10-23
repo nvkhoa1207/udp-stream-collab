@@ -6,7 +6,7 @@ truyền file tin cậy qua UDP trong mạng LAN.
 
 **Thành viên:** Nguyễn Việt Khoa và Hải.
 
-**Cập nhật:** 21/10/2026.
+**Cập nhật:** 23/10/2026.
 
 **Định hướng:** làm đơn giản, bám đề và phản hồi giảng viên; ưu tiên chạy đúng,
 kiểm thử được và giải thích được code.
@@ -210,10 +210,14 @@ CUBIC cần thể hiện cửa sổ tăng theo hàm bậc ba của thời gian, 
 xử lý timeout. Fixed window hoặc chỉ retry chưa phải CUBIC. Ghi rõ phần giản
 lược và đo kết quả; tham khảo [RFC 9438](https://www.rfc-editor.org/rfc/rfc9438.html).
 
-Các điểm cần chốt khi ghép:
+Các quy ước đã chốt và việc cần làm khi ghép:
 
-- `Packet` hiện chưa có trường receiver window. Cần thống nhất thông tin báo
-  khả năng nhận và cách phục hồi khi bản cập nhật cửa sổ bị mất; không bỏ flow control.
+- `Packet.recv_limit` báo sequence tối đa được nhận, đơn vị packet, trên ACK
+  và `WINDOW_UPDATE`; `WINDOW_PROBE` hỏi lại khi hết credit hoặc mất cập nhật.
+  Hợp đồng chi tiết ở [protocol mục 6](docs/01_PROTOCOL.md#6-flow-control-đã-chốt-recv_limit-theo-packet);
+  model/config đã có, hành vi flow control trong transport vẫn cần triển khai.
+- `register_peer(peer, session_id)` không còn yêu cầu khóa; client gọi sau
+  AUTH_OK, server gọi sau BIND hợp lệ. Hàm đăng ký và mạng thật vẫn TODO.
 - Một vòng nhận ở mỗi client dispatch chat/user/file/error. Không để từng tác
   vụ chờ file tự tranh `receive()` rồi lấy mất gói của nhau.
 - `send()` thật chờ ACK; gọi tuần tự từng chunk sẽ thành stop-and-wait. Dùng số
@@ -230,15 +234,18 @@ chưa được tối ưu qua đo và không phải ngưỡng bắt buộc của 
 |---|---|
 | TCP / UDP server | 9000 / 9001 |
 | Datagram tối đa | 1200 byte |
-| Body trước envelope/mã hóa dự kiến | 1100 byte |
+| Body JSON (bản đầu không có envelope mã hóa) | 1100 byte |
 | Payload/chunk tối đa | 480 byte |
 | Record TCP tối đa | 64 KiB |
 | Heartbeat / offline timeout | 3 giây / 10 giây |
 | Retry timeout ban đầu / retry tối đa | 0,5 giây / 8 lần |
-| Cửa sổ khởi đầu | 8 packet |
+| Cửa sổ congestion khởi đầu | 8 packet |
+| Cửa sổ nhận mỗi stream | 8 packet |
+| Nhịp probe / timeout không tăng credit | 1 giây / 10 giây |
+| Tổng stream có buffer mỗi transport | 128 |
 
-Codec phải đo byte sau serialize và phần bao ngoài thực tế. Payload nhỏ không
-tự bảo đảm cả datagram vừa giới hạn. Metadata, user list và lỗi cũng phải vừa
+Bản đầu không có envelope mã hóa; codec phải đo byte sau serialize thực tế.
+Payload nhỏ không tự bảo đảm cả datagram vừa giới hạn. Metadata, user list và lỗi cũng phải vừa
 gói; danh sách online cần chia trang khi vượt giới hạn.
 
 ## 6. Bảo mật trong phạm vi đơn giản
@@ -264,32 +271,24 @@ Nếu chưa bảo vệ kênh đăng nhập hoặc xác thực packet bằng mậ
 hạn; không tuyên bố chống nghe lén hay giả mạo chủ động. Phần bảo mật hiện chưa
 được nghiệm thu.
 
-## 7. Tiến độ thực tế
+## 7. Trạng thái code trong cây nguồn hiện tại
 
-Đối chiếu ngày **21/10/2026**, GitHub `main` ở commit
-[`463c8b3`](https://github.com/nvkhoa1207/udp-stream-collab/commit/463c8b30ab245cd0b7b7049450d639e5708a9a73).
-Bản local có các thay đổi chưa được commit; clone GitHub tại mốc này chưa có
-đầy đủ code trên máy Khoa.
+| Thành phần | Trạng thái |
+|---|---|
+| Packet, MessageType, Transport, mock | Có; model thêm recv_limit và WINDOW_UPDATE/PROBE |
+| Chia file, build_metadata, FileReceiver | Có xử lý local: ghép, bỏ trùng, kiểm tra size/hash |
+| ClientService.send_chat và event MSG | Có, chạy qua mock; user/file/error dispatcher chưa đủ |
+| demo_mock, demo_file_chunks, demo_client_chat, demo_file_receiver | Có trong cây nguồn |
+| register_peer(peer, session_id) | Chữ ký đã bỏ khóa; xử lý đăng ký vẫn TODO |
+| Login/send_file, codec, server/auth/session/router | TODO |
+| Reliable UDP, flow control, CUBIC giản lược | Hợp đồng đã chốt; xử lý mạng vẫn TODO |
+| UI và bridge | HTML/JS fixture, nút disabled; bridge TODO |
+| PayloadCipher | Stub tùy chọn ngoài phạm vi bản đầu |
 
-| Thành phần | GitHub tại commit trên | Local đã kiểm tra |
-|---|---|---|
-| Packet, MessageType, ReceivedPacket, Transport | Có | Có |
-| MemoryHub, MemoryTransport | Có | Có |
-| `iter_chunks()`, `build_metadata()` | Có | Có |
-| FileReceiver begin/accept_chunk/finish | TODO | Đã ghép chunk, bỏ trùng, kiểm tra size/hash |
-| ClientService send_chat | TODO | Đã tạo/gửi MSG qua transport |
-| ClientService receive_events | TODO | Đã xử lý MSG/event queue; chưa đủ user/file/error |
-| ClientService login/send_file | TODO | TODO |
-| Codec, server/auth/session/router | TODO | TODO |
-| ReliableUdpTransport, CongestionController | TODO | TODO |
-| `ui/index.html`, `ui/app.js` | Fixture, nút disabled | Fixture, nút disabled |
-| HTTP bridge, PayloadCipher | TODO | TODO |
-| demo_mock, demo_file_chunks | Có | Có |
-| demo_client_chat, demo_file_receiver | Chưa có | Có, chưa commit |
-
-FileReceiver/chat local mới chứng minh xử lý cơ bản, chưa đủ để đánh dấu hoàn
-tất toàn bộ K2/K3/K4. Bản xem thử giao diện trong `output/` cũng không phải UI
-đã nối vào ứng dụng.
+Đây là mô tả source đi cùng README, không phải tuyên bố GitHub main đã được
+cập nhật hoặc toàn bộ K2/K3/K4 đã xong. Lịch sử GitHub/local và kết quả kiểm tra
+theo phiên bản được tách sang [nhật ký tiến độ](docs/06_TIEN_DO.md). Bản xem thử
+trong `output/` không phải UI đã nối vào ứng dụng.
 
 ## 8. Cài đặt và chạy phần hiện có
 
@@ -327,14 +326,15 @@ python --version
 Nếu PowerShell không cho chạy script activate, dùng trực tiếp
 `.venv\Scripts\python.exe` thay cho `python` trong các lệnh demo.
 
-`requirements.txt` hiện có `cryptography` cho cipher dự kiến. Chỉ cài khi triển
-khai/chạy chức năng sử dụng thư viện đó:
+`requirements.txt` hiện không có dependency bắt buộc ngoài thư viện chuẩn.
+AES-GCM/cryptography là mở rộng tùy chọn; chỉ bổ sung khi thực sự triển khai.
+Lệnh cài dependency (hiện không cài thêm gói):
 
 ```bash
 python -m pip install -r requirements.txt
 ```
 
-### Demo có trong commit GitHub đã kiểm tra
+### Demo mock và chia file
 
 ```bash
 python -m scripts.demo_mock
@@ -349,10 +349,10 @@ python -m scripts.demo_file_chunks
 `demo_file_chunks` tạo/ghi đè `data/demo_original.bin` và `data/demo_copy.bin`.
 Đây là file thử của demo, không dùng chúng để giữ dữ liệu riêng.
 
-### Demo bổ sung ở local
+### Demo client chat và FileReceiver
 
-Chỉ chạy khi có hai script và phần client/file tương ứng. Tại mốc GitHub ở
-mục 7, hai script này chưa được commit nên chưa có khi clone repo.
+Hai script đi cùng phần client/file trong cây nguồn này. Khi ghép, cả hai dùng
+cùng nhánh/commit theo [quy trình Git](docs/03_GIT_WORKFLOW.md).
 
 ```bash
 python -m scripts.demo_client_chat
@@ -383,19 +383,26 @@ chạy ứng dụng hoàn chỉnh để hướng dẫn. Khi ghép xong, mục n�
 bằng lệnh chạy thật, cách tạo tài khoản demo, địa chỉ UI và cách thử hai máy LAN
 đã được kiểm chứng.
 
+### Bố trí demo hai máy sau khi ghép mạng
+
+| Máy Khoa | Máy Hải |
+|---|---|
+| Server trung tâm + client/bridge + browser | Client/bridge + browser |
+| Server bind IP LAN hoặc `0.0.0.0` | Client trỏ IP LAN máy Khoa |
+| Client cũng trỏ IP LAN máy Khoa | Browser mở HTTP localhost của máy Hải |
+
+Hai máy là đủ. Bridge của cả hai vẫn chỉ `127.0.0.1`; không dùng `0.0.0.0` cho
+bridge. Một máy thử nhiều client cần cổng HTTP riêng. Hiện entrypoint còn TODO,
+đây là sơ đồ triển khai; bổ sung lệnh và địa chỉ UI đã kiểm chứng sau khi ghép.
+
 ## 9. Kiểm thử và nghiệm thu
 
-### Kết quả đã kiểm tra ngày 21/10/2026
+### Kết quả kiểm tra theo phiên bản
 
-- Cú pháp 28 file Python: đạt.
-- Bốn demo local ở mục 8: chạy thành công.
-- File 1000 byte chia 480/480/40 byte: hash khớp.
-- FileReceiver nhận `2, 0, 0, 1`: có 3 chunk khác nhau, hash khớp.
-- Hai lệnh `--help`: chạy được; hai entrypoint thực tế vẫn báo chưa triển khai.
-
-Đây là kiểm tra local trên macOS, không phải nghiệm thu mạng hoặc xác nhận
-mọi hệ điều hành. Không suy rộng thành đã đạt tất cả kiểm tra đầu vào, bảo mật
-hoặc file lớn.
+Lệnh, kết quả local và lịch sử kiểm tra được ghi trong
+[nhật ký tiến độ](docs/06_TIEN_DO.md). Bốn demo chỉ dùng mock/đĩa cục bộ; không
+chứng minh UDP thật, mất gói, flow control, CUBIC hoặc UI hoạt động. Bảng nghiệm
+thu mạng vẫn giữ “chưa chạy” đến khi có kết quả ứng dụng thật.
 
 ### Những kiểm thử cần hoàn thành
 
@@ -405,7 +412,7 @@ hoặc file lớn.
 | Online/chat | 3 client, chat chung/riêng | Online cập nhật, private không đến người thứ ba, không nhân đôi tin |
 | File | File rỗng, nhị phân, tên tiếng Việt, 1 KiB/1 MiB/10 MiB | Nhận tự động, đúng byte/size/hash, chỉ hoàn tất sau xác nhận cuối |
 | Reliability | Mất DATA và ACK, gói trùng/sai thứ tự | Retry đúng, không hỏng dữ liệu, hết retry có lỗi rõ |
-| Flow/congestion | Receiver chậm, loss/delay, ACK trùng | Buffer hữu hạn, cửa sổ đúng, log thể hiện thuật toán đã chọn |
+| Flow/congestion | Receiver chậm, mất UPDATE/probe, ACK cũ/trùng, loss/delay | Buffer hữu hạn, không vượt recv_limit, mở lại cửa sổ hoặc timeout hữu hạn, log CUBIC |
 | Đồng thời | Chat khi file gặp loss; 10 rồi 20 client | Stream tiếp tục hoạt động, đo latency và tài nguyên thực tế |
 | Lỗi/bảo mật | Session sai, gói quá lớn, tên chứa `../`, thiếu chunk/hash sai, lỗi ghi | Từ chối phù hợp; không ghi ra ngoài hoặc báo thành công giả |
 | UI | Login, online, chat, chọn file, progress và lỗi | Thao tác được, phản ánh core, không đứng khi truyền file |
@@ -419,9 +426,10 @@ phần mã hóa đã được giản lược thành bắt buộc trở lại.
 
 ## 10. Thứ tự triển khai tiếp theo
 
-1. Đồng bộ client/file và hai demo local để cả hai dùng cùng bản nền.
-2. Chốt codec, session/BIND, thông tin cửa sổ nhận và API chung; ưu tiên giữ
-   cấu trúc hiện có, chỉ thêm trường/hàm khi cơ chế thực tế cần.
+1. Review/ghép nhánh chứa client/file, hai demo và hợp đồng đã đồng bộ để cả hai
+   dùng cùng bản nền. Không mặc định nhánh này đã merge vào main.
+2. Triển khai codec, session/BIND và API theo docs/01_PROTOCOL.md, docs/02_API.md;
+   recv_limit và probe đã có quy ước, cần code và kiểm thử thực tế.
 3. Ghép handshake TCP, đăng nhập, online và chat chung/riêng qua UDP thật.
 4. Hoàn thiện ACK/retry/window và file tự động từ META đến COMPLETE.
 5. Ghép flow/congestion control, các stream độc lập và HTTP UI đơn giản.
@@ -449,6 +457,8 @@ cổng/firewall cho LAN sẽ bổ sung cùng lệnh chạy mạng thật sau ki�
 |---|---|
 | [Giao thức](docs/01_PROTOCOL.md) | Packet và luồng truyền đề xuất |
 | [API chung](docs/02_API.md) | Hợp đồng client/server/transport |
+| [Thiết kế tổng thể](docs/05_THIET_KE_TONG_THE.md) | Tổng hợp kiến trúc theo cùng phạm vi |
+| [Tiến độ và kiểm tra](docs/06_TIEN_DO.md) | Kết quả theo phiên bản, lịch sử local/GitHub |
 | [Quy trình Git](docs/03_GIT_WORKFLOW.md) | Nhánh và cách ghép code |
 | [Nghiệm thu](docs/04_ACCEPTANCE.md) | Các trường hợp kiểm tra và bằng chứng |
 | [TODO Hải](TODO_BAN_A.md) | Server và transport |
@@ -457,12 +467,10 @@ cổng/firewall cho LAN sẽ bổ sung cùng lệnh chạy mạng thật sau ki�
 | [Định hướng UI](ui/README.md) | HTTP bridge và giao diện |
 | [Dàn ý báo cáo](reports/REPORT_OUTLINE.md) | Nội dung báo cáo PDF |
 
-**Phạm vi trong README này là định hướng mới nhất của nhóm.** Các TODO, protocol,
-tài liệu UI và bản đề xuất `docs/05_THIET_KE_TONG_THE.md` có thể còn nội dung cũ
-hoặc mở rộng: Accept/Reject thủ công, TLS/HMAC/AES bắt buộc, receipt chat hoặc
-module/API bổ sung. Những phần đó chưa được coi là quyết định triển khai. Khi
-sửa module liên quan, cập nhật tài liệu theo phạm vi ở đây; `FILE_ACCEPT` được
-hiểu là xác nhận tự động của chương trình.
+**README, protocol, API, TODO, tài liệu UI và thiết kế đã được đồng bộ cùng phạm vi.**
+FILE_ACCEPT là xác nhận tự động; bridge localhost + polling và CUBIC giản lược
+đã chọn; chưa bắt buộc TLS/HMAC/AES, MSG_DELIVERED, Transport.release() hoặc module
+mới. Quyết định thiết kế không có nghĩa các TODO đã được triển khai.
 
 Theo đề, nộp ZIP hoặc liên kết GitHub private, chứa:
 

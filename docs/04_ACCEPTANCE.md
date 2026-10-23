@@ -9,19 +9,28 @@ loss dưới đây là kịch bản đề xuất, không phải ngưỡng điể
 | T01 | Kết nối + đăng nhập đúng/sai | Phản hồi rõ; sai không tạo session | Chưa chạy |
 | T02 | 3 client, chat chung | Các đích dự kiến nhận đúng một lần | Chưa chạy |
 | T03 | A nhắn riêng B, có C | B nhận; C không nhận nội dung | Chưa chạy |
-| T04 | Gửi file rỗng, binary, tên tiếng Việt | Đúng byte/size/hash; tên an toàn | Chưa chạy |
+| T04 | Gửi file rỗng, binary, tên tiếng Việt | Tự FILE_ACCEPT, không cần click nhận; đúng byte/size/hash; tên an toàn | Chưa chạy |
 | T05 | File 1 KiB, 1 MiB và 10 MiB | Không hỏng; bộ nhớ có giới hạn; progress đúng | Chưa chạy |
 | T06 | Mô phỏng mất DATA và ACK 5–10% | Gửi lại, hoàn tất hoặc báo lỗi timeout rõ ràng | Chưa chạy |
 | T07 | Gói trùng, sai thứ tự, ACK trùng | Không nhân đôi nội dung/progress; buffer hữu hạn | Chưa chạy |
 | T08 | Tắt một client khi gửi file | Server sống; báo thất bại, dọn trạng thái/tệp tạm theo chính sách | Chưa chạy |
 | T09 | Một file bị mất gói trong lúc chat | Chat/luồng khác tiếp tục; đo độ trễ thực tế | Chưa chạy |
 | T10 | 10 rồi 20 client đồng thời | Auth/chat/online đúng; server không crash | Chưa chạy |
-| T11 | Sai tag, gói sửa, session giả | Loại gói; không giả danh hay nhận ACK hợp lệ | Chưa chạy |
+| T11 | Session không tồn tại, sai endpoint, sender tự khai sai, packet sai schema/quá lớn | Từ chối sai phiên/nguồn/schema; sender lấy từ phiên; không tuyên bố chống giả mạo mật mã | Chưa chạy |
 | T12 | Filename chứa ../ hoặc path tuyệt đối | Không ghi ra ngoài thư mục nhận | Chưa chạy |
 | T13 | File thiếu chunk, hash sai, lỗi ghi | Không hiển thị thành công; không xuất file hoàn chỉnh sai | Chưa chạy |
-| T14 | UI được giảng viên chấp thuận | Online/chat/progress/lỗi rõ, không block | Chưa chạy |
-| T15 | Congestion dưới loss/delay theo yêu cầu | Hành vi/thuật toán đúng mức đã xác nhận; có số liệu | Chưa chạy |
+| T14 | HTTP bridge localhost + polling | Online/chat/progress/lỗi rõ, không block | Chưa chạy |
+| T15 | CUBIC giản lược dưới loss/delay | Cửa sổ tăng bậc ba, giảm loss/timeout, ACK trùng không tăng; có số liệu | Chưa chạy |
 | T16 | Máy còn lại cài/chạy từ README | Làm được từng bước, không cần hướng dẫn miệng | Chưa chạy |
+| T17 | Receiver dừng consume, window cạn dù DATA đã ACK | Không gửi seq vượt recv_limit; buffer/queue/task hữu hạn | Chưa chạy |
+| T18 | Mất WINDOW_UPDATE mở cửa sổ, mất cả probe/phản hồi đầu | Probe nhịp 1 giây khôi phục credit; timeout hữu hạn nếu không tăng limit | Chưa chạy |
+| T19 | ACK/UPDATE trùng, đảo thứ tự, sai stream/session | Không cộng credit; limit chỉ tăng ở đúng stream/phiên/hướng; ACK không nhận dữ liệu giả | Chưa chạy |
+| T20 | Stream mới xin window lúc hết quota, rồi có chỗ; phiên kết thúc | Chưa cấp buffer thì limit=0; không ACK dữ liệu bỏ; giải phóng đúng quota/phiên | Chưa chạy |
+
+Sai tag/nonce/replay mật mã chỉ kiểm thử nếu bổ sung TLS/HMAC/AES sau này,
+không phải tiêu chí bắt buộc của bản đầu. T11 không chứng minh chống nghe lén
+hay giả mạo chủ động khi kênh chưa được bảo vệ. Kiểm tra local riêng được ghi
+trong [tiến độ](06_TIEN_DO.md), không tự chuyển các hàng mạng trên thành PASS.
 
 ## Mô phỏng mạng
 
@@ -42,9 +51,9 @@ không kiểm tra được UDP thật. Mỗi kiểm thử lưu PASS/FAIL cùng b
 | 5. Messaging | router, service; T02, T03 |
 | 6. File UDP | transport + files; T04–T07, T13 |
 | 7. Errors | timeout/disconnect/cleanup; T08, T13 |
-| 8. Security | cipher + auth/key handling; T11 |
+| 8. Security | auth/session/endpoint, đầu vào/path/quota/localhost; T11–T13, ghi giới hạn chưa mã hóa |
 | 9. UI | ui theo phản hồi giảng viên; T14 |
-| 10. Quality/tests | code sạch, README, kết quả thật; T01–T16 |
+| 10. Quality/tests | code sạch, README, kết quả thật; T01–T20 |
 
 Congestion và tránh HoL vẫn cần đối chiếu phần yêu cầu kỹ thuật dù không có
 dòng điểm riêng. Không dùng bảng này để suy ra chắc chắn 10/10.

@@ -7,10 +7,13 @@ class ReliableUdpTransport:
     def __init__(self, local_address: Peer) -> None:
         self.local_address = local_address
 
-    def register_peer(
-        self, peer: Peer, session_id: str, tx_key: bytes, rx_key: bytes
-    ) -> None:
-        # TODO[A3/A6]: cấu hình sau auth, tách khóa/nonce theo hướng; phối hợp K5.
+    def register_peer(self, peer: Peer, session_id: str) -> None:
+        """Cấu hình peer/phiên sau AUTH; không yêu cầu khóa trong bản chưa mã hóa.
+
+        Client đăng ký server sau AUTH_OK; server đăng ký endpoint sau BIND hợp lệ.
+        Xem docs/02_API.md: đăng ký không tự mở socket hoặc đánh dấu online.
+        """
+        # TODO[A3/A6]: lưu mapping peer/session, kiểm tra đầu vào và xung đột phiên.
         raise NotImplementedError("TODO[A3/A6]: register_peer")
 
     async def start(self) -> None:
@@ -18,14 +21,16 @@ class ReliableUdpTransport:
         raise NotImplementedError("TODO[A5]: ReliableUdpTransport.start")
 
     async def send(self, peer: Peer, packet: Packet) -> None:
-        # TODO[A6]: seq theo stream; cửa sổ; encode + cipher; đợi ACK với retry.
+        # TODO[A6]: seq theo stream; encode JSON; đợi ACK với retry hữu hạn.
         # ACK không cần ACK tiếp; loại heartbeat có chính sách hết hạn riêng.
-        # TODO[A7]: gate theo receiver window + congestion budget; timeout hữu hạn.
+        # TODO[A6]: recv_limit (packet); WINDOW_PROBE/UPDATE và stall timeout.
+        # TODO[A7]: đồng thời tuân ngân sách CUBIC (byte) dùng chung mỗi peer/hướng.
         raise NotImplementedError("TODO[A6]: ReliableUdpTransport.send")
 
     async def receive(self) -> ReceivedPacket:
-        # TODO[A6]: decode envelope, xác thực, ACK, dedup, reorder mỗi stream.
-        # ACK được transport xử lý nội bộ, không giao ACK sang router/client.
+        # TODO[A6]: decode JSON, kiểm tra session/endpoint, ACK, dedup/order.
+        # ACK/WINDOW_UPDATE/WINDOW_PROBE xử lý nội bộ; không giao sang nghiệp vụ.
+        # receive() nhả slot; tăng recv_limit sau giao gói đúng thứ tự cho caller.
         raise NotImplementedError("TODO[A6]: ReliableUdpTransport.receive")
 
     async def close(self) -> None:

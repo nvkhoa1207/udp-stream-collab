@@ -15,7 +15,11 @@ class Transport(Protocol):
         ...
 
     async def receive(self) -> ReceivedPacket:
-        """Real: trả gói đã xác thực, dedup và sắp thứ tự theo stream."""
+        """Real: kiểm tra session/endpoint, dedup/order; trả gói và nhả slot nhận.
+
+        Caller giữ backpressure bằng queue/task hữu hạn; không có release().
+        Kiểm tra phiên không đồng nghĩa với xác thực packet bằng mật mã.
+        """
         ...
 
     async def close(self) -> None:

@@ -4,5 +4,5 @@
 class AuthService:
     async def verify(self, username: str, password: str) -> bool:
         # TODO[A3]: kiểm tra credentials băm có salt, giới hạn input, không log secret.
-        # Chỉ nhận password qua kênh đã bảo vệ. Không return True để bỏ qua auth.
+        # Bản đầu AUTH qua TCP chưa TLS; ghi rõ giới hạn này. Không bỏ qua auth.
         raise NotImplementedError("TODO[A3]: AuthService.verify")

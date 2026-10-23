@@ -37,6 +37,7 @@ def main():
     )
 
     print("Hash giống nhau:", same_hash)
+    assert same_hash and copied.read_bytes() == original.read_bytes()
 
 
 if __name__ == "__main__":

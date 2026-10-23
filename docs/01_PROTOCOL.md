@@ -1,138 +1,198 @@
-# Giao thức v0 — đề xuất để hai người cùng code
+# Giao thức v1 — hợp đồng triển khai chung
 
-Trạng thái: **chưa được nhóm/giảng viên phê duyệt, chưa được triển khai đầy đủ**.
-Đây là quyết định thiết kế của starter, không phải cấu trúc bắt buộc do đề cho.
-Sửa file này cùng `common/models.py` khi thay đổi giao thức.
+Cập nhật 23/10/2026 theo phạm vi trong [README](../README.md) và
+[cuộc trò chuyện đối chiếu](https://chatgpt.com/share/6adb5bb8-0280-83ec-9f78-4044c8b17269).
+Đây là lựa chọn kỹ thuật của nhóm. **Model/API đã cập nhật; codec và transport
+mạng vẫn TODO**, chưa phải giao thức đã chạy hoặc được nghiệm thu.
 
-## 1. Kiến trúc dự kiến
+## 1. Kiến trúc đã chọn
 
-- Server trung tâm quản lý người dùng và chuyển tiếp chat/file.
-- TCP: handshake và đăng nhập; dùng TLS để bảo vệ mật khẩu/cấp khóa phiên nếu
-  phương án này được nhóm chọn. Không gửi khóa phiên thô qua LAN.
-- UDP: dữ liệu chat/file, ACK, heartbeat, cập nhật người dùng và thông báo lỗi.
-- UI độc lập core. Nếu web bắt buộc: xem phương án cầu nối ở `ui/README.md`.
-- Dùng socket chuẩn, async I/O hoặc thread; không Flask/Django/WebSocket.
+- Mỗi máy: browser → HTTP localhost → Python client → server bằng TCP/UDP.
+- TCP 9000: handshake và đăng nhập. UDP 9001: BIND, chat/file, ACK, flow control,
+  heartbeat, online, lỗi và logout.
+- HTTP bridge chỉ bind `127.0.0.1`, phục vụ HTML/CSS/JS và API cùng origin;
+  JavaScript polling bằng `fetch()`. Python dùng thư viện, không dùng framework;
+  không Flask, Django, FastAPI hoặc WebSocket.
+- Bản đầu chưa mã hóa payload, chưa có TLS/HMAC/AES hoặc cấp khóa. Các cơ chế này
+  là mở rộng tùy chọn; giới hạn bảo mật được ghi ở mục 8.
 
-## 2. Handshake và auth TCP
+## 2. Handshake, đăng nhập và BIND
 
-Định dạng mỗi record: 4 byte độ dài big-endian + JSON UTF-8. Giới hạn record
-64 KiB. Một lần `recv()` không đảm bảo đọc đủ record: phải đọc đủ prefix rồi
-đọc đủ body, xử lý EOF giữa chừng. JSON không chứa dữ liệu file.
+Mỗi record TCP là prefix độ dài 4 byte big-endian + JSON UTF-8, body tối đa
+64 KiB. Đọc đủ prefix/body, xử lý EOF và timeout; không coi một `recv()` là đủ.
 
-Các record dự kiến:
-
-- `HELLO`: `version`, `client_name`.
-- `HELLO_ACK`: `version`, `server_name`.
-- `AUTH`: `username`, `password`; chỉ gửi trong kênh bảo vệ đã thiết lập.
-- `AUTH_OK`: `session_id`, địa chỉ/cổng UDP server và thông tin khóa theo thiết
-  kế bảo mật. Dùng hai khóa hướng client→server/server→client để tách nonce.
-- `AUTH_ERROR`: `code`, `message`; không trả thông tin bí mật.
-
-Mật khẩu lưu dưới dạng băm có salt bằng cơ chế chuẩn. Đăng ký tài khoản/database
-không có trong phạm vi starter; có thể tạo trước tài khoản demo ở máy server.
-
-## 3. UDP packet trước mã hóa
-
-Định nghĩa trong `common/models.py`. JSON là lựa chọn dễ debug; dữ liệu nhị phân
-được base64 khi serialize. Chưa có codec chạy thật: A thực hiện A1.
-
-| Field | Ý nghĩa |
+| Record | Trường ngoài `type` |
 |---|---|
-| `version` | Phiên bản giao thức, tạm là 1 |
-| `kind` | Loại thông điệp trong `MessageType` |
-| `session_id` | Phiên của chặng đang truyền, transport gán |
-| `message_id` | ID logic UUID hex; giữ khi gửi lại và chuyển tiếp để đối chiếu |
-| `sender`, `recipient` | Username; `recipient="*"` là chat chung |
-| `stream_id` | Luồng độc lập, tối đa 64 ký tự; file dùng ID riêng |
-| `seq` | Sequence bắt đầu từ 1 theo mỗi chặng/phiên/stream; transport gán |
-| `ack` | Sequence được xác nhận cho packet ACK; ACK không được ACK tiếp |
-| `chunk_index` | Chỉ số chunk bắt đầu từ 0; chỉ dùng với FILE_CHUNK |
-| `payload` | Bytes trong code; base64 trong JSON wire |
+| `HELLO` | `version`, `client_name` |
+| `HELLO_ACK` | `version`, `server_name` |
+| `AUTH` | `username`, `password` |
+| `AUTH_OK` | `session_id`, `udp_port` — không có `tx_key`/`rx_key` |
+| `AUTH_ERROR` | `code`, `message` — không chứa bí mật |
 
-Giới hạn khởi đầu: UDP cuối cùng tối đa 1200 byte; JSON trước mã hóa tối đa 1100
-byte; payload thô mỗi packet tối đa 480 byte. Đây là **giá trị do nhóm đề xuất**.
-Phải đo đúng byte sau serialize + envelope/tag; không cho rằng kích thước file
-chunk bằng toàn bộ datagram. Từ chối gói quá lớn/trường sai, không âm thầm cắt.
-Với tin chat dài hơn giới hạn, UI báo rõ; cơ chế phân mảnh chat là mở rộng sau.
+Tài khoản demo tạo trước, mật khẩu lưu bằng hàm băm có salt. Username dài 1–32
+ký tự ASCII `[A-Za-z0-9_-]`; `*` dành riêng cho chat chung. Từ chối username đang
+sử dụng. Session ID ngẫu nhiên 128-bit, biểu diễn 32 ký tự hex, chỉ giữ trong RAM.
 
-Metadata, user list và lỗi cũng phải tuân giới hạn. USER_LIST phân trang trong
-các payload `{revision, page, pages, users:[...]}`; số user trên mỗi trang theo
-kích thước encode thực tế. Client chỉ thay danh sách khi nhận đủ cùng revision.
-Như vậy 10–20 user không phải nhét vào một gói quá lớn.
+1. AUTH đúng tạo phiên đang chờ BIND; chưa đưa user vào danh sách online.
+2. Client nhận AUTH_OK, đăng ký `(server_udp_peer, session_id)` với transport và
+   gửi BIND từ socket UDP sẽ dùng suốt phiên.
+3. Server nhận BIND ở đường bootstrap: kiểm tra phiên chờ còn hạn và IP nguồn
+   khớp kết nối TCP. Lấy endpoint từ `recvfrom`, không lấy từ payload tự khai.
+   Sau đó `SessionRegistry.bind_peer()` và `register_peer(peer, session_id)`.
+4. Server gửi BIND_OK; client chỉ gửi nghiệp vụ sau BIND_OK. Server công bố online
+   khi bind hợp lệ. BIND trùng cùng endpoint trả lại BIND_OK; endpoint khác bị từ chối.
+5. Hết 10 giây chưa BIND, logout hoặc heartbeat timeout thì hủy phiên. Kết nối
+   lại tạo session mới; không tự thay endpoint của phiên đã bind.
 
-## 4. Loại gói và payload
+BIND/BIND_OK dùng `stream_id="control"`, `seq=0`, payload rỗng. Client retry BIND
+với RTO/số lần hữu hạn cho đến BIND_OK; không cần cửa sổ dữ liệu hoặc ACK riêng.
+Nhờ vậy không phải đăng ký khóa giả hoặc đợi flow control trước khi tạo phiên.
+
+## 3. Packet UDP và giới hạn
+
+Nguồn model: [common/models.py](../common/models.py). Wire là JSON UTF-8 với
+payload base64. `Packet` bất biến; transport dùng bản sao khi gán session/seq.
+
+| Field | Quy ước |
+|---|---|
+| `version` | 1 |
+| `kind` | Giá trị `MessageType` |
+| `session_id` | Phiên của chặng trực tiếp, transport gán |
+| `message_id` | UUID hex; giữ khi retry/relay để đối chiếu |
+| `sender`, `recipient` | Danh tính nghiệp vụ; server xác định sender từ phiên |
+| `stream_id` | ID luồng tối đa 64 ký tự; mỗi file có ID riêng |
+| `seq` | Reliable DATA bắt đầu từ 1 theo chặng/phiên/hướng/stream; ứng dụng để 0 |
+| `ack` | Chỉ ACK dùng: một sequence DATA >= 1; loại khác là `None` |
+| `chunk_index` | Chỉ FILE_CHUNK dùng: chỉ số từ 0; loại khác là `None` |
+| `payload` | Bytes trong code, base64 trên wire |
+| `recv_limit` | Bắt buộc trên ACK/WINDOW_UPDATE: số nguyên >= 0, sequence DATA tối đa bên kia được gửi; loại khác là `None` |
+
+`recv_limit` tính bằng **packet**, là giới hạn tuyệt đối, không phải byte hoặc số
+slot còn trống tại một thời điểm. `None` nghĩa là không quảng bá, khác với 0 là
+chưa cấp quyền gửi. Codec phải loại bool, số âm và sai tổ hợp field/kind.
+
+Datagram tối đa 1200 byte; body JSON tối đa 1100 byte (`MAX_PLAINTEXT_BYTES`, giữ
+tên cũ để tương thích); payload thô tối đa 480 byte. Bản đầu không có envelope/tag
+mật mã. Kiểm tra byte encode thực tế của cả packet, kể cả `recv_limit`; payload
+480 byte không tự bảo đảm mọi header đều vừa gói. Không cắt dữ liệu âm thầm.
+
+USER_LIST dùng `{revision, page, pages, users:[...]}`, page từ 0. Chia trang theo
+kích thước encode; client chỉ thay danh sách sau khi đủ các trang cùng revision.
+Tên file, metadata và ERROR cũng phải vừa giới hạn.
+
+## 4. Loại gói và stream
 
 | Loại | Payload / hành vi |
 |---|---|
-| `BIND` / `BIND_OK` | Gắn UDP endpoint với session TCP đã xác thực; không tin IP/port tự khai |
-| `HEARTBEAT` | Cập nhật last_seen; không cần giữ vô hạn khi mất gói |
-| `USER_LIST` | JSON phân trang theo quy ước ở trên |
-| `MSG` | Text UTF-8; người nhận `*` hoặc username |
-| `FILE_META` | JSON: `name`, `size`, `sha256`, `chunk_size`, `total_chunks`; stream_id là transfer ID |
-| `FILE_ACCEPT` | Người nhận đồng ý và đã chuẩn bị chỗ nhận |
-| `FILE_CHUNK` | Bytes thô; chunk_index và stream_id trong header |
-| `FILE_END` | Bên gửi đã hoàn tất chuỗi gửi; chưa được coi là file nhận thành công |
-| `FILE_COMPLETE` | Người nhận kiểm tra đủ byte/hash rồi xác nhận; chứa `sha256`, `size` |
-| `FILE_CANCEL` | Hủy truyền; giải phóng buffer/tệp tạm |
-| `ACK` | ack tham chiếu một seq trong stream/phiên đó; payload rỗng |
-| `ERROR` | JSON: `code`, `message`, `related_message_id` |
-| `LOGOUT` | Thoát có chủ đích; mất gói vẫn được heartbeat timeout xử lý |
+| `BIND`, `BIND_OK` | Bootstrap phiên như mục 2 |
+| `HEARTBEAT` | Payload rỗng, seq=0, không ACK/retry; gửi lại ở nhịp kế tiếp |
+| `USER_LIST` | JSON phân trang |
+| `MSG` | Text UTF-8; recipient `*` hoặc username |
+| `FILE_META` | JSON `name`, `size`, `sha256`, `chunk_size`, `total_chunks` |
+| `FILE_ACCEPT` | Payload rỗng; chương trình nhận đã kiểm tra metadata và chuẩn bị nơi lưu |
+| `FILE_CHUNK` | Bytes file; có chunk_index |
+| `FILE_END` | Payload rỗng; hết dữ liệu gửi, chưa phải hoàn tất |
+| `FILE_COMPLETE` | JSON `sha256`, `size`; file đã được xác minh và lưu |
+| `FILE_CANCEL` | JSON `transfer_id`, `reason`; đi control để tránh chờ chunk mất |
+| `ACK` | Payload rỗng, ack và recv_limit; chỉ xác nhận một DATA được giữ hợp lệ |
+| `WINDOW_UPDATE` | Payload rỗng, recv_limit; không xác nhận DATA |
+| `WINDOW_PROBE` | Payload rỗng; hỏi recv_limit của stream |
+| `ERROR` | JSON `code`, `message`, `related_message_id`; đi control |
+| `LOGOUT` | Payload rỗng; dọn phiên, heartbeat timeout dự phòng khi mất gói |
 
-## 5. Độ tin cậy theo từng chặng
+ACK/WINDOW_UPDATE/WINDOW_PROBE có seq=0, không được ACK và không giao lên router
+hay ClientService. Chúng tham chiếu **chiều DATA đối diện** trong stream/phiên
+đó. Chỉ chấp nhận control từ endpoint của phiên hợp lệ. BIND và heartbeat cũng
+không chiếm sequence reliable. Các loại còn lại dùng sequence reliable >= 1.
 
-1. A→server: transport xác nhận nhận dữ liệu. Server kiểm tra session và định tuyến.
-2. Server→B: một chặng riêng với sequence, ACK và khóa phiên của B.
-3. ACK từ server **không chứng minh B đã lưu được file**. Chỉ FILE_COMPLETE từ B
-   sau kiểm tra hash mới là thành công ở cấp ứng dụng. Lỗi chuyển tiếp phải báo A.
+Tách stream chat/control và từng file. Server khi relay giữ message_id nhưng
+cấp session/seq của chặng đích; chat từ các sender khác nhau cần stream riêng
+trên cùng chặng ra, ID sinh/ánh xạ không vượt 64 ký tự. ACK/window của A→server
+không được chuyển nguyên sang chặng server→B.
 
-Tách sequence/window/buffer theo `(peer, session_id, stream_id)`; không tạo một
-dãy seq toàn cục chặn mọi người dùng. Cùng stream cần giữ thứ tự khi nghiệp vụ
-yêu cầu; các stream độc lập vẫn tiến triển khi file mất gói. Chat, quản lý user
-và mỗi file dùng stream riêng; server tránh forward tuần tự chặn toàn bộ luồng.
+## 5. ACK, retry và sliding window
 
-Retransmit chỉ gói chưa ACK sau timeout; ACK trùng không nhân đôi tiến độ. Gói
-trùng đã nhận cần ACK lại để xử lý ACK mất, nhưng không giao cho ứng dụng hai lần.
-Không ACK packet đã bị loại vì buffer đầy. Buffer/window đều có giới hạn và cơ
-chế báo khả năng nhận (receiver window) cần được nhóm chốt trong A6.
+- Selective Repeat: ACK riêng từng seq, giữ gói sai thứ tự trong buffer hữu hạn.
+  Chỉ giao nghiệp vụ một lần và theo thứ tự trong stream; gói trùng được ACK lại.
+- ACK sau khi giữ packet hợp lệ trong buffer. Không ACK packet bị loại do đầy,
+  sai phiên, sai kích thước hoặc vượt cửa sổ. ACK không cam kết đã ghi ra đĩa.
+- `send()` đợi ACK chặng kế tiếp hoặc raise lỗi. Caller dùng số task hữu hạn để
+  tận dụng cửa sổ; không gửi tuần tự từng chunk thành stop-and-wait.
+- RTO ban đầu 0,5 giây, tối đa 8 lần gửi lại; đo RTT trên gói chưa retransmit,
+  backoff và timeout hữu hạn. Hết retry làm stream thất bại, không bỏ qua lỗ seq.
+- ACK trùng/cũ không tăng progress/cwnd hoặc giải phóng bytes_in_flight lần hai.
+- ACK từ server chỉ chứng minh chặng đầu; lỗi relay phải báo người gửi.
+  Chat chưa có receipt “đã giao/đã đọc”. File chỉ xong sau FILE_COMPLETE hợp lệ.
 
-`send()` được await đến ACK hoặc thất bại. Để có sliding window, caller gửi bằng
-producer/queue hoặc số task hữu hạn; không await tuần tự từng chunk thành stop-
-and-wait, cũng không tạo task không giới hạn. Hết số retry báo lỗi/hủy rõ ràng.
+## 6. Flow control đã chốt: recv_limit theo packet
 
-## 6. Luồng file
+Trạng thái riêng cho mỗi `(peer, session_id, hướng DATA, stream_id)`:
 
-1. Gửi FILE_META với transfer ID mới; đợi FILE_ACCEPT (hoặc lỗi/từ chối/timeout).
-2. Gửi FILE_CHUNK theo cửa sổ truyền; ghi nhận tiến độ bằng byte duy nhất đã ACK.
-3. Bên nhận lưu `.part`, xử lý chunk trùng/sai thứ tự và kiểm tra giới hạn.
-4. Sau các chunk, gửi FILE_END. File rỗng có 0 chunk, vẫn có metadata/end/hash.
-5. Bên nhận kiểm tra size và SHA-256, đổi tên file tạm rồi gửi FILE_COMPLETE.
-6. Bên gửi nhận FILE_COMPLETE đúng transfer/hash mới hiển thị hoàn tất.
+- Bên nhận có `W = RECEIVE_WINDOW_PACKETS = 8` slot, chứa cả reorder và hàng đợi
+  sẵn sàng giao. `consumed_seq` là seq cuối đã giao **liên tiếp** qua `receive()`.
+- Khi đã dành đủ W slot cho stream: `recv_limit = consumed_seq + W`. Không giảm
+  giới hạn đã cấp trong phiên/stream. Bên gửi hợp nhất cập nhật bằng
+  `peer_recv_limit = max(peer_recv_limit, received_limit)`; gói cũ không thu hồi
+  credit và gói lặp không cấp thêm credit.
+- Stream mới bắt đầu với `peer_recv_limit=0`; sender gửi WINDOW_PROBE. Receiver
+  dành buffer rồi trả WINDOW_UPDATE(W). Khi chưa đủ quota trả limit=0, không ACK
+  dữ liệu chưa giữ. Tối đa `MAX_RECEIVE_STREAMS=128` stream có buffer trên mỗi
+  transport, kể cả control; dành slot cho control ngay khi BIND trước khi cấp
+  buffer file/chat. Thiếu quota thì từ chối phiên/stream mới, không lấy phần
+  control cho file. Giới hạn này là cấu hình khởi đầu, chưa đo tải.
+- DATA mới chỉ gửi nếu `next_seq <= peer_recv_limit` **và** đủ ngân sách congestion.
+  Mỗi seq mới dùng một slot. Retransmit cùng seq không dùng thêm slot, vẫn theo
+  lịch retry/congestion. ACK giải phóng bytes đang bay, không tự tạo slot nhận.
+- Khi `receive()` giao packet đúng thứ tự, nhả slot, tăng consumed_seq và gửi
+  WINDOW_UPDATE với giới hạn mới. ACK cũng mang giới hạn hiện tại. Không cần thêm
+  API `release()`; caller phải dùng queue/worker hữu hạn, không rút vô hạn từ receive.
+- Mạng nhận/ACK/window chạy riêng với xử lý đĩa/UI. Receiver giữ lời hứa buffer
+  cho credit đã cấp; không hạ limit hoặc thu hồi slot vì downstream tạm chậm.
+  Stream đã kết thúc giữ trạng thái chống trùng cho các retry còn có thể đến,
+  không tái sử dụng stream ID trong cùng phiên.
 
-Giới hạn tên, quota, kích thước và thời gian chờ cần có; không dùng tên file do
-mạng gửi để ghi ngoài thư mục nhận; tránh overwrite file sẵn có. Hash dùng để
-kiểm tra toàn vẹn nội dung, không thay thế xác thực/mã hóa.
+**Ví dụ:** W=8, receiver cấp limit=8. Sender gửi seq 1–8; dù cả 8 đã ACK, seq 9
+vẫn phải chờ. Receiver giao seq 1–3 cho ứng dụng thì gửi limit=11: sender được
+thêm seq 9–11. UPDATE cũ limit=8 hoặc ACK trùng không thay đổi limit=11.
 
-## 7. Bảo mật
+**Mất thông báo mở cửa sổ:** khi còn dữ liệu cần gửi nhưng chưa có credit,
+sender gửi WINDOW_PROBE tối đa mỗi 1 giây cho stream. Receiver trả WINDOW_UPDATE
+hiện tại kể cả khi chưa có DATA. Các gói này đi ngoài cửa sổ DATA, được giới hạn
+nhịp để không gây vòng ACK hoặc flood. Mất probe/update thì nhịp sau hỏi lại.
+Sau `WINDOW_STALL_TIMEOUT_SECONDS=10` giây không tăng credit khi đang bị chặn,
+báo timeout và kết thúc stream; phản hồi cùng limit không reset deadline.
+Không ngừng retry DATA đã gửi chỉ vì đang hết credit cho DATA mới.
 
-Khoa triển khai AES-GCM bằng thư viện chuẩn. Mã hóa/authenticate cả header trong
-và payload. Envelope ngoài có session ID và counter/nonce đủ để chọn khóa, được
-ràng buộc vào associated data. A và Khoa chốt định dạng trước khi viết riêng.
+Đây mới là **hợp đồng và field trong model**. A6 còn phải triển khai state,
+buffer, probe timer, kiểm tra quota và các kịch bản T17–T19 trong bảng nghiệm thu.
 
-Nonce phải duy nhất với mỗi khóa. Có thể dùng counter 96-bit riêng mỗi hướng
-với khóa hướng riêng, không tái dùng khóa khi reset counter. Retry: gửi lại đúng
-ciphertext cũ hoặc tạo nonce mới cho lần mã hóa mới; không đổi plaintext rồi mã
-hóa lại với nonce cũ. Kiểm tra replay/dedup ở transport, cho phép ACK lại bản sao
-hợp lệ. Gói bị sửa/sai tag bị loại, không cấp ACK hợp lệ cho dữ liệu giả.
+## 7. File tự động nhận
 
-Đây là bảo vệ theo chặng client–server. Server giải mã rồi mã hóa lại cho người
-nhận; không mô tả là end-to-end encryption giữa hai người dùng.
+1. META với transfer ID mới → client nhận kiểm tra metadata/khả năng lưu, tạo
+   `.part`, **tự gửi ACCEPT**. Lỗi thì ERROR; không có nút Accept/Reject thủ công.
+2. Sender chờ ACCEPT rồi gửi chunk bằng concurrency hữu hạn. Tiến độ là byte
+   duy nhất đã ACK **đến server**, không phải byte được receiver ghi xuống đĩa.
+3. Receiver xử lý trùng/sai thứ tự; sender gửi END sau khi chunk đã ACK chặng đầu.
+4. Receiver chỉ hoàn tất sau đủ chunk, đúng size/SHA-256 và lưu file thành công;
+   gửi COMPLETE có đúng transfer/size/hash. Sender lúc đó mới báo hoàn tất.
+5. File rỗng có 0 chunk nhưng vẫn META/ACCEPT/END/COMPLETE. Lỗi, timeout/cancel
+   phải có thông báo và dọn tài nguyên; không chờ vô hạn hoặc báo thành công giả.
 
-## 8. Congestion và tài liệu tham khảo
+Tên file không chứa đường dẫn, không ghi ngoài thư mục nhận hoặc ghi đè file có
+sẵn. Cần giới hạn tên, kích thước, số transfer và deadline. FileReceiver local
+mới có xử lý cơ bản; giới hạn/dọn lỗi và điều phối đầu-cuối vẫn cần hoàn thiện.
 
-Đề nêu BBR/CUBIC; xác nhận chọn thuật toán và mức triển khai ngày 1. Fixed window
-hay timeout đơn giản chưa phải BBR/CUBIC. Ghi đúng thuật toán thực hiện và đo trên
-loss/delay, phối hợp với flow control. Không lấy phần này ra khỏi TODO khi chưa xác nhận.
+## 8. Bảo mật và CUBIC trong phạm vi hiện tại
 
-- Python asyncio/socket: https://docs.python.org/3/library/asyncio-protocol.html
-- AES-GCM và nonce: https://cryptography.io/en/stable/hazmat/primitives/aead/
-- Đề bài, mục 3, 6–10: nguồn các yêu cầu; giao thức cụ thể ở trên là đề xuất nhóm.
+Không bắt buộc TLS/HMAC/AES hoặc tx_key/rx_key trong bản đầu. Vẫn cần băm mật khẩu
+có salt, session khó đoán, kiểm tra endpoint/quyền gửi/đầu vào, quota, tên file an
+toàn, HTTP localhost và không log bí mật. Băm mật khẩu lưu trữ không che password
+trong AUTH qua TCP. Session/endpoint và SHA-256 không bảo vệ trước nghe lén hoặc
+giả mạo chủ động; không tuyên bố packet đã được xác thực bằng mật mã.
+
+Chọn **CUBIC giản lược**, không còn chờ chọn BBR hay CUBIC. Controller dùng chung
+cho các stream trên một peer/hướng, trả ngân sách byte; flow control ở mục 6 tính
+packet, phải thỏa cả hai điều kiện khi gửi. Cần cửa sổ tăng theo hàm bậc ba của
+thời gian, giảm khi loss, xử lý timeout và tránh tăng do ACK trùng; fixed window
+và retry đơn thuần chưa phải CUBIC. Đo loss/delay và ghi rõ phần giản lược, không
+khẳng định tuân thủ đầy đủ [RFC 9438](https://www.rfc-editor.org/rfc/rfc9438.html).

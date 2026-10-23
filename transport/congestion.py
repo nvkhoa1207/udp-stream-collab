@@ -1,9 +1,9 @@
-"""Owner A, Khoa hỗ trợ đo. KHÔNG phải một bản BBR/CUBIC đã triển khai."""
+"""Owner Hải, Khoa hỗ trợ đo. Đã chọn CUBIC giản lược; chưa triển khai."""
 
 
 class CongestionController:
     def budget_bytes(self) -> int:
-        # TODO[A7]: ngân sách gửi còn lại theo thuật toán được xác nhận.
+        # TODO[A7]: ngân sách byte còn lại theo CUBIC giản lược, mỗi peer/hướng.
         raise NotImplementedError("TODO[A7]: budget_bytes")
 
     def on_ack(self, acknowledged_bytes: int, rtt_seconds: float) -> None:

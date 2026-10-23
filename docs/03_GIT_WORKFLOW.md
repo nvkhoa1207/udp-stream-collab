@@ -1,42 +1,60 @@
-# Ghép code trong 5 ngày
+# Ghép code giữa Khoa và Hải
 
-Chỉ áp dụng khi nhóm đã tạo repository chung. Starter chưa khởi tạo hoặc push
-bất kỳ repository nào. Một người đưa bộ khung lên trước, người kia clone cùng repo.
+Repository chung: [udp-stream-collab](https://github.com/nvkhoa1207/udp-stream-collab).
+Đồng bộ ngày 23/10/2026 trên nhánh `codex/align-protocol-docs`: tài liệu, hợp đồng
+peer/window, code client/file local và hai demo bổ sung. Đây là nhánh để review,
+không mặc định đã merge vào `main`.
 
-## Nhánh
+## Lấy nhánh đồng bộ để thử
 
-- A: `feature/server-transport`.
-- Khoa: `feature/client-file-ui`.
-- `main`: phiên bản cả hai đã ghép và chạy thử.
-
-Sau khi có commit nền, mỗi người tạo nhánh của mình, ví dụ:
+Khi working tree của Hải đã sạch hoặc thay đổi đã lưu trên nhánh riêng:
 
 ```bash
-git switch -c feature/client-file-ui
+git fetch origin
+git switch --track origin/codex/align-protocol-docs
+python -m scripts.demo_mock
+python -m scripts.demo_file_chunks
+python -m scripts.demo_client_chat
+python -m scripts.demo_file_receiver
 ```
 
-Khi hoàn thành một phần, chọn đúng file mình sửa:
+Nếu đã có nhánh local tương ứng thì dùng `git switch codex/align-protocol-docs`.
+Không reset/checkout đè phần chưa commit để lấy nhánh. Bốn demo dùng bộ nhớ/đĩa
+local; không chứng minh mạng thật. Xem [tiến độ](06_TIEN_DO.md) để biết giới hạn.
+
+## Nhánh phát triển và commit
+
+- Hải: `feature/server-transport`.
+- Khoa: `feature/client-file-ui`.
+- `main`: phiên bản hai người đã review, ghép và chạy thử.
+
+Chọn đúng file, gồm cả script kiểm tra và thay đổi hợp đồng liên quan. Ví dụ khi
+chỉ hoàn thiện client/file và demo:
 
 ```bash
 git status
-git add client/ security/ ui/ TODO_KHOA.md
-git commit -m "Implement client chat using shared transport"
+git add client/files.py client/service.py scripts/demo_client_chat.py scripts/demo_file_receiver.py TODO_KHOA.md
+git diff --cached
+git commit -m "Implement local client chat and file receiver demos"
 git push -u origin feature/client-file-ui
 ```
 
-Thông điệp commit phải phản ánh việc thật đã làm. A thay bằng đường dẫn/nhánh của A.
+Chạy trên nhánh `feature/client-file-ui` đã tạo/chuyển tới trước đó. Nếu sửa API,
+đưa model/config, transport, caller và docs tương ứng vào cùng thay đổi. Không
+chỉ push TODO mà bỏ sót code/demo; không dùng `git add .` khi có output/dữ liệu thử.
 
-## Cuối mỗi ngày
+## Khi ghép
 
-1. Commit phần đang làm; kiểm tra không thêm khóa, password, `.venv` hoặc file nhận.
-2. Người còn lại review thay đổi API và chạy demo tương ứng.
-3. Merge qua PR hoặc cùng ghép local theo quy trình nhóm; không force-push nhánh chung.
-4. Mỗi người cập nhật `main` vào nhánh của mình trước khi làm tiếp:
+1. Kiểm tra diff, không đưa khóa/password, `.venv`, file nhận hoặc output thử vào commit.
+2. Ghi nhánh/commit vào PR hoặc bàn giao; người còn lại chạy demo cùng phiên bản.
+3. Merge qua PR hoặc cùng ghép local, không force-push nhánh chung.
+4. Cập nhật `main` vào nhánh riêng khi đã lưu thay đổi:
 
 ```bash
 git fetch origin
 git merge origin/main
 ```
 
-Nếu conflict ở `common/`, cả hai giải quyết cùng nhau. Không chọn toàn bộ ours/
-theirs chỉ để mất conflict. Giữ lại một commit chạy được mỗi tối để quay lại khi cần.
+Conflict nội dung là README/docs/API chưa thống nhất; conflict Git là cùng dòng
+khác nhau khi merge. Với `common/`, đối chiếu protocol và caller của cả hai, không
+chọn toàn bộ ours/theirs chỉ để hết conflict. Giữ commit chạy được để quay lại.

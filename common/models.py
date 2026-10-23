@@ -1,4 +1,4 @@
-"""Hợp đồng dữ liệu nháp. Hai người thống nhất trước khi thay đổi."""
+"""Hợp đồng dữ liệu theo docs/01_PROTOCOL.md; codec/UDP vẫn đang triển khai."""
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -20,6 +20,8 @@ class MessageType(str, Enum):
     FILE_COMPLETE = "FILE_COMPLETE"
     FILE_CANCEL = "FILE_CANCEL"
     ACK = "ACK"
+    WINDOW_UPDATE = "WINDOW_UPDATE"
+    WINDOW_PROBE = "WINDOW_PROBE"
     ERROR = "ERROR"
     LOGOUT = "LOGOUT"
 
@@ -33,10 +35,13 @@ class Packet:
     payload: bytes = b""
     message_id: str = field(default_factory=lambda: uuid4().hex)
     session_id: str = ""  # Real transport gán sau auth; mock không xác thực.
-    seq: int = 0  # 0 ở lớp ứng dụng; real transport gán sequence >= 1.
+    seq: int = 0  # DATA được transport gán >= 1; ACK/window/bootstrap/heartbeat giữ 0.
     ack: int | None = None
     chunk_index: int | None = None
     version: int = 1
+    # ACK/WINDOW_UPDATE: sequence tối đa được nhận ở chiều DATA đối diện.
+    # Đơn vị packet, giới hạn tuyệt đối tăng dần; None nghĩa là không quảng bá.
+    recv_limit: int | None = None
 
 
 @dataclass(frozen=True)

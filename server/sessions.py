@@ -9,7 +9,8 @@ class SessionRegistry:
         raise NotImplementedError("TODO[A3]: SessionRegistry.create")
 
     def bind_peer(self, session_id: str, peer: Peer) -> None:
-        # TODO[A3]: chỉ gọi sau khi BIND đã được xác thực bằng khóa của phiên.
+        # TODO[A3]: BIND có session đang chờ sau AUTH; lấy peer từ recvfrom.
+        # Không đổi endpoint của phiên đã bind; không coi đây là xác thực mật mã.
         raise NotImplementedError("TODO[A3]: SessionRegistry.bind_peer")
 
     def touch(self, session_id: str) -> None:

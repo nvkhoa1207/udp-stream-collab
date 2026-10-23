@@ -1,4 +1,8 @@
-"""Owner Khoa. Fail-closed skeleton: không bao giờ trả plaintext thay ciphertext."""
+"""Mở rộng AES-GCM tùy chọn, nằm ngoài bản đầu và không được core gọi.
+
+Giữ stub fail-closed: không bao giờ trả plaintext thay ciphertext.
+K5 hiện là kiểm tra an toàn đầu vào/file/bridge, không bắt buộc triển khai cipher.
+"""
 
 
 class PayloadCipher:
@@ -8,10 +12,10 @@ class PayloadCipher:
         self._key = key
 
     def seal(self, plaintext: bytes, nonce: bytes, associated_data: bytes) -> bytes:
-        # TODO[K5]: AESGCM.encrypt; nonce duy nhất cho từng key; ràng buộc header ngoài.
+        # OPTIONAL: AESGCM.encrypt; nonce duy nhất cho từng key; ràng buộc header ngoài.
         # A quản lý counter/lifetime; hai người chốt envelope trước khi code riêng.
-        raise NotImplementedError("TODO[K5]: PayloadCipher.seal")
+        raise NotImplementedError("Optional AES-GCM: PayloadCipher.seal")
 
     def open(self, ciphertext: bytes, nonce: bytes, associated_data: bytes) -> bytes:
-        # TODO[K5]: AESGCM.decrypt; InvalidTag phải được báo/loại, không bypass.
-        raise NotImplementedError("TODO[K5]: PayloadCipher.open")
+        # OPTIONAL: AESGCM.decrypt; InvalidTag phải được báo/loại, không bypass.
+        raise NotImplementedError("Optional AES-GCM: PayloadCipher.open")
