@@ -51,8 +51,11 @@ Protocol và MemoryTransport: mock không làm auth/BIND.
 
 `Packet.recv_limit: int | None` nằm cuối dataclass để giữ thứ tự tham số cũ.
 ACK và WINDOW_UPDATE mang giới hạn sequence tuyệt đối của chiều DATA đối diện,
-đơn vị packet. WINDOW_PROBE hỏi lại khi chưa có credit; cả ba loại dùng seq=0,
-không ACK tiếp và không tranh cửa sổ DATA. `None` không có nghĩa là 0.
+đơn vị packet. WINDOW_PROBE đi cùng chiều DATA cần gửi để hỏi khả năng nhận:
+với DATA A→B, A gửi PROBE→B; B tra trạng thái nhận A→B rồi gửi UPDATE→A.
+ACK cũng đi B→A; A dùng ACK/UPDATE để cập nhật trạng thái gửi A→B, không phải
+trạng thái nhận B→A. Cả ba loại dùng seq=0, không ACK tiếp và không tranh cửa sổ
+DATA. `None` không có nghĩa là 0.
 
 Cấu hình chung: RECEIVE_WINDOW_PACKETS=8, WINDOW_PROBE_SECONDS=1,
 WINDOW_STALL_TIMEOUT_SECONDS=10, MAX_RECEIVE_STREAMS=128. Sender khởi đầu limit=0,

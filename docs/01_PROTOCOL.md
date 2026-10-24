@@ -96,13 +96,20 @@ Tên file, metadata và ERROR cũng phải vừa giới hạn.
 | `FILE_CANCEL` | JSON `transfer_id`, `reason`; đi control để tránh chờ chunk mất |
 | `ACK` | Payload rỗng, ack và recv_limit; chỉ xác nhận một DATA được giữ hợp lệ |
 | `WINDOW_UPDATE` | Payload rỗng, recv_limit; không xác nhận DATA |
-| `WINDOW_PROBE` | Payload rỗng; hỏi recv_limit của stream |
+| `WINDOW_PROBE` | Payload rỗng; bên gửi DATA hỏi recv_limit của bên nhận, đi cùng chiều DATA |
 | `ERROR` | JSON `code`, `message`, `related_message_id`; đi control |
 | `LOGOUT` | Payload rỗng; dọn phiên, heartbeat timeout dự phòng khi mất gói |
 
 ACK/WINDOW_UPDATE/WINDOW_PROBE có seq=0, không được ACK và không giao lên router
-hay ClientService. Chúng tham chiếu **chiều DATA đối diện** trong stream/phiên
-đó. Chỉ chấp nhận control từ endpoint của phiên hợp lệ. BIND và heartbeat cũng
+hay ClientService. Hướng của từng loại trong cùng stream/phiên:
+
+- **WINDOW_PROBE đi cùng chiều DATA cần gửi.** Với DATA A→B, A gửi PROBE→B
+  để hỏi khả năng nhận của B. B tra trạng thái nhận DATA A→B và trả UPDATE→A.
+- **ACK/WINDOW_UPDATE đi ngược chiều DATA mà chúng tham chiếu.** Với DATA A→B,
+  B gửi ACK/UPDATE→A; A cập nhật trạng thái gửi DATA A→B. UPDATE trả lời PROBE
+  không cấp credit cho chiều DATA B→A và không xác nhận đã nhận DATA.
+
+Chỉ chấp nhận control từ endpoint của phiên hợp lệ. BIND và heartbeat cũng
 không chiếm sequence reliable. Các loại còn lại dùng sequence reliable >= 1.
 
 Tách stream chat/control và từng file. Server khi relay giữ message_id nhưng
