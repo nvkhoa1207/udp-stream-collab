@@ -6,7 +6,7 @@ truyền file tin cậy qua UDP trong mạng LAN.
 
 **Thành viên:** Nguyễn Việt Khoa và Hải.
 
-**Cập nhật:** 23/10/2026.
+**Cập nhật:** 24/10/2026.
 
 **Định hướng:** làm đơn giản, bám đề và phản hồi giảng viên; ưu tiên chạy đúng,
 kiểm thử được và giải thích được code.
@@ -216,6 +216,8 @@ Các quy ước đã chốt và việc cần làm khi ghép:
   và `WINDOW_UPDATE`; `WINDOW_PROBE` hỏi lại khi hết credit hoặc mất cập nhật.
   Hợp đồng chi tiết ở [protocol mục 6](docs/01_PROTOCOL.md#6-flow-control-đã-chốt-recv_limit-theo-packet);
   model/config đã có, hành vi flow control trong transport vẫn cần triển khai.
+- Stream kết thúc trả buffer ACTIVE, giữ dấu CLOSED nhỏ đến hết phiên; quy
+  ước quota/lifecycle ở protocol mục 6.1, Hải còn triển khai và kiểm thử.
 - `register_peer(peer, session_id)` không còn yêu cầu khóa; client gọi sau
   AUTH_OK, server gọi sau BIND hợp lệ. Hàm đăng ký và mạng thật vẫn TODO.
 - Một vòng nhận ở mỗi client dispatch chat/user/file/error. Không để từng tác
@@ -276,7 +278,7 @@ hạn; không tuyên bố chống nghe lén hay giả mạo chủ động. Phầ
 | Thành phần | Trạng thái |
 |---|---|
 | Packet, MessageType, Transport, mock | Có; model thêm recv_limit và WINDOW_UPDATE/PROBE |
-| Chia file, build_metadata, FileReceiver | Có xử lý local: ghép, bỏ trùng, kiểm tra size/hash |
+| Chia file, build_metadata, FileReceiver | Có xử lý local: metadata/hash/quota, ghép/dedup, cancel/expire/close |
 | ClientService.send_chat và event MSG | Có, chạy qua mock; user/file/error dispatcher chưa đủ |
 | demo_mock, demo_file_chunks, demo_client_chat, demo_file_receiver | Có trong cây nguồn |
 | register_peer(peer, session_id) | Chữ ký đã bỏ khóa; xử lý đăng ký vẫn TODO |

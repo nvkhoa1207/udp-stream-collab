@@ -18,7 +18,7 @@ Mở `scripts/demo_mock.py` trước: đây là cách làm song song mà chưa c
 
 ## Trạng thái local
 
-Đã có send_chat, event MSG, chia file và FileReceiver cơ bản; hai demo client
+Đã có send_chat, event MSG, chia file và FileReceiver có validate/quota/cleanup local; hai demo client
 chat/file receiver đã có trong cây nguồn. K1, K4, K6 còn TODO; K2/K3/K5 mới có
 một phần, chưa tick hoàn tất theo kết quả mock. Xem [tiến độ](docs/06_TIEN_DO.md).
 

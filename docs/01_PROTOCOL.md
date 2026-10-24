@@ -1,6 +1,6 @@
 # Giao thức v1 — hợp đồng triển khai chung
 
-Cập nhật 23/10/2026 theo phạm vi trong [README](../README.md) và
+Cập nhật 24/10/2026 theo phạm vi trong [README](../README.md) và
 [cuộc trò chuyện đối chiếu](https://chatgpt.com/share/6adb5bb8-0280-83ec-9f78-4044c8b17269).
 Đây là lựa chọn kỹ thuật của nhóm. **Model/API đã cập nhật; codec và transport
 mạng vẫn TODO**, chưa phải giao thức đã chạy hoặc được nghiệm thu.
@@ -164,7 +164,46 @@ báo timeout và kết thúc stream; phản hồi cùng limit không reset deadl
 Không ngừng retry DATA đã gửi chỉ vì đang hết credit cho DATA mới.
 
 Đây mới là **hợp đồng và field trong model**. A6 còn phải triển khai state,
-buffer, probe timer, kiểm tra quota và các kịch bản T17–T19 trong bảng nghiệm thu.
+buffer, probe timer, kiểm tra quota và các kịch bản T17–T22 trong bảng nghiệm thu.
+
+### 6.1. Thu hồi stream và chống trùng (Hải triển khai)
+
+`MAX_RECEIVE_STREAMS=128` giới hạn **buffer ACTIVE/DRAINING**, không phải tổng
+stream từng xuất hiện trong phiên. Tách ba loại trạng thái:
+
+| Trạng thái | Giữ gì | Khi nào thu hồi |
+|---|---|---|
+| ACTIVE | W slot, reorder/ready queue, pending sends/timer | Chưa thu hồi chỉ vì queue đang rỗng; peer vẫn còn credit đã cấp |
+| DRAINING | Buffer và các send còn đợi ACK | File hoàn tất: đợi xử lý/forward hết DATA và ACK của COMPLETE ở từng chặng; ngừng cấp DATA mới |
+| CLOSED | Bản ghi nhỏ: ID/phiên/hướng, seq đã giao, kết quả success/failure | Thu hồi toàn bộ payload buffer, slot active và task/timer ngay khi đóng; giữ bản ghi đến hết phiên |
+
+- File thành công: nghiệp vụ báo kết thúc cho transport của từng chặng sau khi
+  COMPLETE đã được chuyển tiếp/xác nhận và không còn dữ liệu chờ xử lý. Server
+  theo dõi riêng hai chặng, không đóng chặng ra chỉ vì chặng vào đã ACK.
+- ERROR/CANCEL, hết retry hoặc timeout: kết thúc stream với lỗi, fail các send
+  đang chờ, dừng worker liên quan và bỏ buffer; chuyển CLOSED ngay, không chờ ACK
+  của chunk thiếu. Cancel/error đi control, không phụ thuộc cửa sổ stream file.
+- Chat/control tái sử dụng stream trong suốt phiên; không tạo stream cho từng tin
+  nhắn. Không đóng stream đang idle để thu hồi credit đã cấp. Logout/expire phiên
+  hủy tất cả stream và xóa mapping/bản ghi của phiên đó; packet phiên cũ bị loại.
+- CLOSED không nhận DATA mới, không cấp window mới và không quay lại ACTIVE do
+  probe/META đến muộn. DATA đã giao có thể được ACK lại nhưng không giao lại;
+  gói từng giữ rồi bị bỏ khi stream lỗi không được ACK như đã giao thành công.
+  Phản hồi lỗi trạng thái đóng qua control có giới hạn nhịp, không hồi sinh stream.
+- Cache kết quả FILE_COMPLETE/lỗi tối đa **120 giây**, để xử lý retry khi phản
+  hồi cuối bị mất. RTO backoff cần chặn ở **4 giây**, tối đa 8 retry; sau deadline
+  kết thúc thì sender không gửi DATA mới trên stream cũ. Hết 120 giây bỏ payload
+  kết quả, vẫn giữ dấu CLOSED (ID + seq + trạng thái) cho đến hết phiên.
+- Giới hạn riêng **4096 bản ghi CLOSED mỗi phiên**, tính cả stream kết thúc lỗi;
+  dành chỗ bản ghi trước khi nhận stream mới. Chạm trần thì báo cần tạo phiên mới,
+  không xóa dấu chống trùng của phiên còn sống. Giới hạn số phiên hoạt động của
+  server cũng phải hữu hạn. Nhờ vậy có thể chạy hơn 128 file nối tiếp mà không
+  giữ 128 buffer mãi; bộ nhớ lịch sử vẫn có trần và packet cũ không tái tạo file.
+
+Đây là hợp đồng lifecycle, chưa có code transport. Khi ghép, Hải cần nối tín
+hiệu kết thúc nghiệp vụ với state transport; không thêm API release từng packet.
+Thử >128 file nối tiếp, mất ACK COMPLETE, DATA/META/probe đến muộn, đủ quota
+CLOSED và session reconnect theo T21/T22 trước khi đánh dấu hoàn thành.
 
 ## 7. File tự động nhận
 
@@ -180,7 +219,8 @@ buffer, probe timer, kiểm tra quota và các kịch bản T17–T19 trong bả
 
 Tên file không chứa đường dẫn, không ghi ngoài thư mục nhận hoặc ghi đè file có
 sẵn. Cần giới hạn tên, kích thước, số transfer và deadline. FileReceiver local
-mới có xử lý cơ bản; giới hạn/dọn lỗi và điều phối đầu-cuối vẫn cần hoàn thiện.
+đã có kiểm tra metadata/quota và cancel/expire/close; caller cần nối timer, hủy,
+lỗi và shutdown vào các API này. Điều phối đầu-cuối qua mạng vẫn TODO.
 
 ## 8. Bảo mật và CUBIC trong phạm vi hiện tại
 

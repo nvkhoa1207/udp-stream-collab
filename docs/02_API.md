@@ -1,6 +1,6 @@
 # API để code song song
 
-Cập nhật 23/10/2026 theo [README](../README.md) và [giao thức](01_PROTOCOL.md).
+Cập nhật 24/10/2026 theo [README](../README.md) và [giao thức](01_PROTOCOL.md).
 Nguồn code: `common/contracts.py`, `common/models.py`. Các hàm còn
 `NotImplementedError` là TODO, không phải tính năng đã chạy.
 
@@ -78,7 +78,7 @@ dấu flow control hoàn thành chỉ vì constructor Packet nhận được fie
 - Event hiện có: `{type: "message", sender, recipient, text}` và lỗi UTF-8.
   Event users/progress/status/error nghiệp vụ sẽ được bổ sung khi ghép chức năng.
 - `FileReceiver.begin/accept_chunk/finish` đã xử lý file local, trùng/sai thứ tự,
-  size/hash. `send_file()` và luồng META → ACCEPT tự động → CHUNK → END → COMPLETE
+  size/hash, quota và dọn file (chi tiết bên dưới). `send_file()` và luồng META → ACCEPT tự động → CHUNK → END → COMPLETE
   chưa triển khai; hash local không chứng minh truyền file qua mạng.
 - HTTP localhost + polling đã chọn. Bridge gọi ClientService; browser không mở
   socket mạng hay gọi PayloadCipher. Xem [UI](../ui/README.md).
@@ -92,3 +92,44 @@ có lifecycle và phiên đúng, truyền vào ClientService để kiểm thử 
 Hải phụ trách server/transport/common; Khoa phụ trách client/file/UI và phối hợp
 an toàn đầu vào. Đổi API thì cập nhật caller/model/docs cùng thay đổi; không tự
 thêm mã hóa, MSG_DELIVERED hay module mới để đáp ứng một bản đề xuất cũ.
+
+## FileReceiver: giới hạn và lifecycle local
+
+Constructor giữ `FileReceiver(output_directory)`, thêm cấu hình keyword:
+`max_file_bytes=16 MiB`, `max_total_bytes=64 MiB`, `max_transfers=4`,
+`max_chunks=65536`, `timeout_seconds=45`, `clock=time.monotonic`.
+Các quota áp dụng cho file đang nhận trên instance; không phải quota ổ đĩa cho
+các file đã hoàn tất. `reserved_bytes` là tổng size META đã dành, không phải số
+byte đã ghi. Chỉ trả quota sau khi dọn `.part` thành công.
+
+META phải có đúng name/size/sha256/chunk_size/total_chunks; strict type (loại
+bool), hash hex 64 ký tự, tên UTF-8 tối đa 128 byte, không path/ký tự điều khiển/
+tên thiết bị, số chunk khớp size. Transfer ID hex thường 32 ký tự. Hash file rỗng
+được kiểm tra ngay; SHA-256 nội dung luôn kiểm tra khi finish.
+
+- `begin`: validate/quota rồi tạo `.part` độc quyền; thất bại không có transfer
+  mới. META trùng ID đang nhận bị từ chối, không xóa transfer cũ.
+- `accept_chunk`: giữ dedup/reorder; lỗi dữ liệu/index/ghi làm hủy và dọn transfer.
+  Chunk mới ghi thành công mới cập nhật last_progress; chunk trùng không kéo timeout.
+- `finish`: thiếu chunk/sai size/hash/lỗi publish thì dọn transfer và raise.
+  Tạo tên đích bằng hard link cùng filesystem để không ghi đè file xuất hiện
+  đồng thời; filesystem không hỗ trợ thì báo lỗi, không fallback rename ghi đè.
+- `cancel(id) -> bool`: idempotent, xóa file tạm và trả quota; không xóa file
+  hoàn chỉnh hoặc file không thuộc instance. False nếu ID không hoạt động.
+- `expire() -> list[str]`: dùng monotonic, dọn transfer không tiến triển >=45s
+  và retry các cleanup đã lỗi. Caller cần timer định kỳ, đề xuất mỗi giây.
+- `close()`: dọn tất cả transfer khi logout/shutdown, vẫn thử các transfer khác
+  nếu một file không xóa được; trả ExceptionGroup nếu còn lỗi dọn.
+
+Không có timer/thread tự mở trong FileReceiver. Caller tuần tự hóa mọi lời gọi
+trên instance trong worker riêng để I/O/hash không chặn vòng mạng. `begin` tự
+quét expire; accept/finish cũng từ chối transfer hết hạn trước khi xử lý.
+Lỗi unlink giữ state/quota để thử dọn lại; không báo cleanup thành công giả.
+Nếu file đã publish đúng hash nhưng unlink `.part` lỗi, giữ file đích và state;
+caller có thể retry finish hoặc cancel để dọn, không báo FILE_COMPLETE trước khi
+finish thành công. Thư mục nhận là thư mục cục bộ tin cậy của client; chưa có
+phục hồi transfer hoặc tự xóa file mồ côi của phiên/process trước sau restart.
+
+Quota FileReceiver và quota stream độc lập. Hải triển khai thu hồi buffer khi
+stream CLOSED, giữ dấu chống trùng nhỏ đến hết phiên theo protocol mục 6.1.
+Client dispatcher/timer chưa ghép; các API local này chưa chứng minh file mạng.

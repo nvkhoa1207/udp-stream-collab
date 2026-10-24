@@ -1,11 +1,22 @@
 # Tiến độ và kết quả theo phiên bản
 
+## Bổ sung theo review của Hải — 24/10/2026
+
+- FileReceiver đã validate schema/hash/tên/ID, quota size/tổng byte/transfer/chunk,
+  cancel/expire/close, dọn lỗi và publish không ghi đè đích. Lỗi dọn giữ quota để
+  retry; không tự có timer hoặc resume sau restart. API chi tiết trong docs/02_API.
+- Vòng đời stream ACTIVE/DRAINING/CLOSED: trả buffer khi đóng; cache kết quả
+  120s và giữ dấu CLOSED nhỏ đến hết phiên, quota 4096/phiên. Hải triển khai,
+  kiểm thử >128 stream nối tiếp và packet đến muộn còn TODO.
+- Comment login dùng peer/session. Server, codec, transport vẫn do Hải triển khai.
+- Regression local: `python -m unittest discover -s tests -v` (16 test);
+  bốn demo tiếp tục chạy. Đây không phải kiểm thử UDP/flow/CUBIC.
+
 ## Snapshot đồng bộ ngày 23/10/2026
 
 Nhánh: `codex/align-protocol-docs`, phát triển từ local HEAD `80d1e0e`.
-Kết quả dưới đây gắn với cây nguồn trong **cùng commit chứa bản cập nhật file
-này**, không khẳng định main hoặc máy Hải đã có thay đổi. Xem commit bằng
-`git log -1 --format='%h %s' -- docs/06_TIEN_DO.md`; lấy nhánh theo
+Kết quả snapshot dưới đây gắn với commit `c1494d9`, không khẳng định main hoặc máy Hải đã có thay đổi. Xem snapshot bằng
+`git show c1494d9:docs/06_TIEN_DO.md`; lấy nhánh theo
 [quy trình Git](03_GIT_WORKFLOW.md).
 
 Phạm vi sửa theo [cuộc trò chuyện](https://chatgpt.com/share/6adb5bb8-0280-83ec-9f78-4044c8b17269):
@@ -49,11 +60,11 @@ Ba demo file/chat có assertion để exit khác 0 khi kết quả sai. Không d
   lớp thật chưa lưu mapping, ReliableUdpTransport/CongestionController vẫn stub.
 - Auth/session/BIND/router/heartbeat/online và socket TCP/UDP chưa triển khai.
 - Client login/send_file, USER_LIST/file/error dispatch chưa hoàn chỉnh.
-- FileReceiver chưa đủ kiểm tra schema/hash đầu vào, quota file/transfer, dọn
-  lỗi/timeout/cancel và xử lý race ghi đè. Chưa gọi là xong toàn bộ K3/K4/K5.
+- FileReceiver đã được bổ sung theo review ở đầu file; còn nối dispatcher,
+  timer expire, cancel/error và shutdown của ClientService. Chưa xong K4/K5.
 - Queue event hữu hạn đã có nhưng chính sách backpressure/gộp progress và tách
   worker đĩa chưa được ghép/test với mạng; UI/bridge vẫn TODO/fixture.
-- T01–T20 trong [nghiệm thu](04_ACCEPTANCE.md) **chưa chạy trên ứng dụng thật**.
+- T01–T22 trong [nghiệm thu](04_ACCEPTANCE.md) **chưa chạy trên ứng dụng thật**.
   Không suy từ mock ra đã đạt loss/ACK/retry/window/CUBIC, 10–20 client hoặc bảo mật.
 
 ## Lịch sử được chuyển từ README cũ

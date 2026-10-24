@@ -30,6 +30,8 @@ vẫn chưa hoàn thành trên mạng thật; cập nhật ngày 23/10/2026.
 - [ ] ACK/UPDATE mang recv_limit theo packet; giới hạn tăng dần, không cộng credit từ ACK trùng.
 - [ ] Stream mới xin window bằng probe; mất UPDATE mở cửa sổ vẫn hỏi lại được, có timeout.
 - [ ] Dành buffer trước khi cấp credit; tuân giới hạn tổng stream/bộ nhớ.
+- [ ] ACTIVE/DRAINING → CLOSED trả slot buffer; dấu CLOSED tách riêng, cache
+      kết quả 120s, giữ ID đến hết phiên (quota 4096); thử >128 file nối tiếp.
 - [ ] ACK client gửi tới server chỉ là chặng đầu; báo lỗi nếu chuyển tiếp tới đích thất bại.
 - [ ] Phối hợp Khoa: băm mật khẩu lưu trữ, kiểm tra session/đầu vào và giới hạn tài nguyên.
 - [ ] Ghi rõ TCP AUTH và UDP chưa được bảo vệ bằng mật mã; không nhận là chống nghe lén/giả mạo chủ động.

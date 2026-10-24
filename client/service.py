@@ -19,7 +19,7 @@ class ClientService:
         # TODO[K1]: handshake TCP + auth; AUTH_OK trả session_id, không trả khóa.
         # Đăng ký peer/session rồi BIND/BIND_OK theo docs/02_API.md.
         # Cần truyền cấu hình TCP riêng; server_peer là endpoint UDP.
-        # Nhận cấu hình phiên, A đăng ký peer/key; BIND trước dữ liệu nghiệp vụ.
+        # Nhận cấu hình phiên, đăng ký peer/session; BIND trước dữ liệu nghiệp vụ.
         raise NotImplementedError("TODO[K1]: ClientService.login")
 
     async def send_chat(self, recipient: str, text: str) -> None:

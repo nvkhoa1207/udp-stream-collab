@@ -26,6 +26,8 @@ loss dưới đây là kịch bản đề xuất, không phải ngưỡng điể
 | T18 | Mất WINDOW_UPDATE mở cửa sổ, mất cả probe/phản hồi đầu | Probe nhịp 1 giây khôi phục credit; timeout hữu hạn nếu không tăng limit | Chưa chạy |
 | T19 | ACK/UPDATE trùng, đảo thứ tự, sai stream/session | Không cộng credit; limit chỉ tăng ở đúng stream/phiên/hướng; ACK không nhận dữ liệu giả | Chưa chạy |
 | T20 | Stream mới xin window lúc hết quota, rồi có chỗ; phiên kết thúc | Chưa cấp buffer thì limit=0; không ACK dữ liệu bỏ; giải phóng đúng quota/phiên | Chưa chạy |
+| T21 | Hơn 128 file nối tiếp trong một phiên, chat vẫn hoạt động | Slot ACTIVE được tái dùng sau mỗi file; CLOSED không giữ payload buffer | Chưa chạy |
+| T22 | Mất ACK COMPLETE, packet/probe cũ sau đóng, đủ 4096 CLOSED rồi reconnect | Không giao/tạo file lại; cache kết quả rồi dấu CLOSED; quota lịch sử hữu hạn, phiên mới hoạt động | Chưa chạy |
 
 Sai tag/nonce/replay mật mã chỉ kiểm thử nếu bổ sung TLS/HMAC/AES sau này,
 không phải tiêu chí bắt buộc của bản đầu. T11 không chứng minh chống nghe lén
@@ -53,7 +55,7 @@ không kiểm tra được UDP thật. Mỗi kiểm thử lưu PASS/FAIL cùng b
 | 7. Errors | timeout/disconnect/cleanup; T08, T13 |
 | 8. Security | auth/session/endpoint, đầu vào/path/quota/localhost; T11–T13, ghi giới hạn chưa mã hóa |
 | 9. UI | ui theo phản hồi giảng viên; T14 |
-| 10. Quality/tests | code sạch, README, kết quả thật; T01–T20 |
+| 10. Quality/tests | code sạch, README, kết quả thật; T01–T22 |
 
 Congestion và tránh HoL vẫn cần đối chiếu phần yêu cầu kỹ thuật dù không có
 dòng điểm riêng. Không dùng bảng này để suy ra chắc chắn 10/10.
