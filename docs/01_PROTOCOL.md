@@ -1,6 +1,6 @@
 # Giao thức v1 — hợp đồng triển khai chung
 
-Cập nhật 24/10/2026 theo phạm vi trong [README](../README.md) và
+Cập nhật 28/10/2026 theo phạm vi trong [README](../README.md) và
 [cuộc trò chuyện đối chiếu](https://chatgpt.com/share/6adb5bb8-0280-83ec-9f78-4044c8b17269).
 Đây là lựa chọn kỹ thuật của nhóm. **Model/API đã cập nhật; codec và transport
 mạng vẫn TODO**, chưa phải giao thức đã chạy hoặc được nghiệm thu.
@@ -76,9 +76,15 @@ tên cũ để tương thích); payload thô tối đa 480 byte. Bản đầu kh
 mật mã. Kiểm tra byte encode thực tế của cả packet, kể cả `recv_limit`; payload
 480 byte không tự bảo đảm mọi header đều vừa gói. Không cắt dữ liệu âm thầm.
 
-USER_LIST dùng `{revision, page, pages, users:[...]}`, page từ 0. Chia trang theo
-kích thước encode; client chỉ thay danh sách sau khi đủ các trang cùng revision.
-Tên file, metadata và ERROR cũng phải vừa giới hạn.
+USER_LIST do server tạo (`sender="server"`), dùng
+`{revision, page, pages, users:[...]}`. `users` là danh sách username dạng chuỗi
+theo quy tắc ở mục 2, không trùng trong cùng danh sách. `revision` là số nguyên
+không âm, tăng khi danh sách thay đổi; `pages >= 1`, `0 <= page < pages`.
+Danh sách rỗng vẫn có một trang với `users=[]`. Mỗi revision có số trang và nội
+dung cố định; chia trang theo kích thước encode và giới hạn payload.
+Client chỉ thay danh sách sau khi đủ các trang cùng revision; bỏ trang trùng và
+revision cũ, không trộn các phiên bản. Tên file, metadata và ERROR cũng phải
+vừa giới hạn.
 
 ## 4. Loại gói và stream
 
@@ -93,7 +99,7 @@ Tên file, metadata và ERROR cũng phải vừa giới hạn.
 | `FILE_CHUNK` | Bytes file; có chunk_index |
 | `FILE_END` | Payload rỗng; hết dữ liệu gửi, chưa phải hoàn tất |
 | `FILE_COMPLETE` | JSON `sha256`, `size`; file đã được xác minh và lưu |
-| `FILE_CANCEL` | JSON `transfer_id`, `reason`; đi control để tránh chờ chunk mất |
+| `FILE_CANCEL` | JSON đúng hai trường `transfer_id` (32 hex thường), `reason` (chuỗi 1–128 ký tự); đi control, chunk_index null; payload tối đa 480 byte |
 | `ACK` | Payload rỗng, ack và recv_limit; chỉ xác nhận một DATA được giữ hợp lệ |
 | `WINDOW_UPDATE` | Payload rỗng, recv_limit; không xác nhận DATA |
 | `WINDOW_PROBE` | Payload rỗng; bên gửi DATA hỏi recv_limit của bên nhận, đi cùng chiều DATA |
@@ -214,6 +220,12 @@ CLOSED và session reconnect theo T21/T22 trước khi đánh dấu hoàn thành
 
 ## 7. File tự động nhận
 
+Mỗi lượt truyền dùng UUID hex thường 32 ký tự làm `transfer_id`; các gói
+META/ACCEPT/CHUNK/END/COMPLETE dùng `stream_id = transfer_id`. Server giữ ID này
+khi relay file; session/seq vẫn thuộc từng chặng. File chỉ gửi riêng đến một
+username, không dùng recipient `*`. ERROR đi stream `control`, liên hệ gói gây
+lỗi bằng `related_message_id`; CANCEL mang transfer_id trong payload như mục 4.
+
 1. META với transfer ID mới → client nhận kiểm tra metadata/khả năng lưu, tạo
    `.part`, **tự gửi ACCEPT**. Lỗi thì ERROR; không có nút Accept/Reject thủ công.
 2. Sender chờ ACCEPT rồi gửi chunk bằng concurrency hữu hạn. Tiến độ là byte
@@ -226,8 +238,31 @@ CLOSED và session reconnect theo T21/T22 trước khi đánh dấu hoàn thành
 
 Tên file không chứa đường dẫn, không ghi ngoài thư mục nhận hoặc ghi đè file có
 sẵn. Cần giới hạn tên, kích thước, số transfer và deadline. FileReceiver local
-đã có kiểm tra metadata/quota và cancel/expire/close; caller cần nối timer, hủy,
-lỗi và shutdown vào các API này. Điều phối đầu-cuối qua mạng vẫn TODO.
+đã có kiểm tra metadata/quota và cancel/expire/close. ClientService đã nối
+META/CHUNK/END qua worker, kiểm tra người gửi của lượt truyền, lưu file rồi trả
+COMPLETE hoặc ERROR; quét expire và dọn khi dừng vòng nhận. Kết quả COMPLETE/lỗi
+khi xử lý CHUNK/END được cache tối đa 120 giây, gói lặp không gia hạn cache;
+ID đã dùng vẫn giữ tới hết phiên. Phía gửi tự động đã có send_file và dispatcher
+ACCEPT/COMPLETE/ERROR; thử hai ClientService qua relay bộ nhớ thành công.
+CANCEL qua giao thức và snapshot tiến độ hai chiều đã thử qua mock. Phía nhận
+đếm byte chunk duy nhất đã ghi thành công; đủ byte chưa bỏ qua bước kiểm tra
+size/hash khi END. Timer hết hạn có snapshot local, chưa tự gửi ERROR chủ động
+sang sender (sender vẫn có deadline riêng). Sender dừng
+và đợi các send/I/O đang chạy trước khi gửi CANCEL trên control; nếu sau META
+có lỗi/timeout hoặc hủy task thì cũng thử báo CANCEL, deadline 3s. ACK chặng
+server của CANCEL không xác nhận bên nhận đã dọn xong. Nếu báo hủy thất bại,
+receiver vẫn có timeout/close; caller nhận lỗi/status, không báo thành công giả.
+
+Receiver kiểm tra chủ lượt truyền trước khi hủy, dọn .part và trả quota. CANCEL
+có thể vượt META vì khác stream: giữ ID đã hủy tới hết phiên (trong quota 4096),
+META muộn không được tạo file. Lỗi FILE_CANCELLED được cache 120s như lỗi file
+khác; CANCEL lặp không kéo dài cache. Nếu đã COMPLETE, giữ nguyên file cuối và
+có thể trả lại COMPLETE đang cache. CANCEL sai schema không thay đổi state;
+khác chủ trả FILE_SENDER_MISMATCH. Lỗi dọn file giữ quota để expire/close thử lại.
+
+Kiểm thử đầu-cuối qua mạng, HTTP/UI và xử lý stream/ACK của transport vẫn chưa
+triển khai. Phần gửi/nhận CANCEL không tự thay thế hook đóng
+stream mà Hải phải nối vào transport.
 
 ## 8. Bảo mật và CUBIC trong phạm vi hiện tại
 

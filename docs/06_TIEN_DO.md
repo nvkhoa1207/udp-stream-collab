@@ -1,11 +1,124 @@
 # Tiến độ và kết quả theo phiên bản
 
-## Commit K2: danh sách online — 28/10/2026
+## Đóng gói các bài học thành commit — 28/10/2026
 
-- Ghép USER_LIST theo revision, kiểm tra schema/username, bỏ trang trùng/cũ.
-- Dispatcher vẫn nhận chat khi danh sách chưa đầy đủ.
-- Kiểm tra snapshot commit: 27 test local; demo_client_users và demo_client_chat.
-- Client file dispatcher/login/UI vẫn cần triển khai ở các commit sau.
+- USER_LIST: commit `bab2dd0`, snapshot riêng qua 27 test cùng demo_client_users
+  và demo_client_chat; đã push lên `codex/align-protocol-docs`.
+- Commit chứa mục nhật ký này đóng gói luồng gửi/nhận file, worker, progress,
+  CANCEL, timeout, test/demo và API tương ứng. Các thành phần đang phụ thuộc
+  chung dispatcher được giữ cùng nhau để commit chạy độc lập. Kiểm tra: 97 test,
+  demo_client_file_control và demo_client_receive_status; chỉ chứng minh mock/local.
+- Từ đây, mỗi phần mới phải kiểm tra → commit → push trước khi sang phần khác,
+  theo docs/03_GIT_WORKFLOW.md. Không tự merge main. `output/` giữ local.
+- Các ghi chú “chưa commit/push” trong mục bài học bên dưới mô tả thời điểm học,
+  trước đợt đóng gói này; không phải trạng thái của phiên bản đã được commit.
+
+## Phần Khoa: trạng thái và tiến độ phía nhận — 28/10/2026
+
+- poll_file_updates trả cả send/receive; giới hạn chung 100 record, khóa theo
+  chiều + ID và lock ngắn giữa worker đĩa với event loop. Không bỏ kết quả cuối
+  chưa đọc; đầy thì từ chối META trước tạo .part bằng FILE_STATUS_LIMIT.
+- Nhận chunk mới ghi thành công mới cộng received_bytes. Xuất receiving,
+  verifying, completed, failed, cancelled, expired; thông báo lỗi có code/message
+  an toàn, không lộ path. Chunk trùng/sai sender không tăng tiến độ.
+- Expire định kỳ và expire trong begin đồng bộ trạng thái; lỗi dọn giữ snapshot
+  cleanup_pending/quota, retry thành công cập nhật cờ. COMPLETE gửi lỗi hoặc
+  shutdown sau finish vẫn giữ file và completed, confirmation_delivery=failed.
+- 97 test PASS (13 mới), gồm trùng/sai thứ tự, hash sai, hết hạn, quota snapshot,
+  retry cleanup, hai chiều cùng ID và hủy worker trong lúc finish. Demo
+  demo_client_receive_status PASS: 0/40/520/1000 byte, completed; expired và failed
+  với sai hash, chỉ file đúng còn lại, không còn .part/quota.
+- Còn login/logout, HTTP/UI, nút hủy nhận local, timeout báo chủ động về sender
+  và tích hợp mạng/stream với Hải. Test dùng mock/đồng hồ giả, chưa UDP thật.
+  Thay đổi bài học vẫn local, chưa commit/push.
+
+## Phần Khoa: tiến độ phía gửi và FILE_CANCEL — 28/10/2026
+
+- Thêm poll_file_updates: snapshot byte đã được send xác nhận và trạng thái;
+  đủ byte vẫn verifying, chỉ COMPLETE hợp lệ mới completed. Gộp snapshot theo
+  ID, tối đa 100 record; giữ kết quả cuối tới khi đọc, đầy thì từ chối lượt mới.
+- Thêm cancel_file(id), dừng/đợi tác vụ con rồi gửi CANCEL control với deadline
+  3s. Lỗi/timeout sau META cũng thử báo CANCEL. cancel_delivery phân biệt kết
+  quả gửi tới server với việc receiver đã dọn; lỗi gửi hủy không che lỗi gốc.
+- Worker nhận CANCEL kiểm tra chủ lượt truyền, dọn .part/quota, giữ ID chống
+  META đến sau. CANCEL lặp không gia hạn cache; file đã COMPLETE được giữ nguyên.
+- 84 test PASS (14 mới): tiến độ không tăng khi send còn chờ; 100% chưa hoàn
+  tất; cancel API/remote/task, cancel timeout, cancel hai lần, cleanup qua relay,
+  CANCEL trước META/sau COMPLETE/sai chủ, lỗi unlink và giới hạn snapshot/quota.
+- Demo_client_file_control PASS: 5120/5120 verifying rồi completed; lượt tiếp
+  hủy tại 1920/5120, receiver dọn .part/quota và giữ nguyên file đầu tiên.
+- Vẫn là mock, chưa có ACK/UDP thật. Còn login/logout, HTTP/UI, snapshot phía
+  nhận, nút hủy lượt nhận local và tích hợp vòng đời stream với Hải. Chưa commit/push.
+
+## Phần Khoa: gửi file tự động — 28/10/2026
+
+- Thêm FileSender, nối ClientService.send_file và dispatcher ACCEPT/COMPLETE/ERROR.
+  META → chờ ACCEPT → nhóm tối đa 8 CHUNK → END → COMPLETE đúng size/hash.
+  Một file gửi mỗi client; tối đa 16 MiB và 4096 lần xử lý gửi mỗi phiên.
+- Hash/đọc nguồn chạy trong thread, phát hiện nguồn đổi trước END. Deadline
+  send 45s, chờ ACCEPT/COMPLETE 30s; lỗi/hủy dừng và đợi các task con, đóng nguồn
+  và giải phóng lượt gửi. ERROR đối chiếu message_id đã gửi, kể cả chunk cũ.
+- Bộ test local: 70 PASS (14 test mới); gồm gửi/nhận cùng nhau, file rỗng,
+  phản hồi sai/sớm, thiếu ACCEPT/COMPLETE, lỗi liên quan chunk cũ, giới hạn
+  concurrency, hủy, send timeout, vòng nhận dừng và nguồn bị thay đổi.
+- Demo_client_file_send PASS: hai ClientService qua relay bộ nhớ truyền 5120
+  byte, file đích khớp nội dung/SHA-256, quota nhận được trả lại.
+- Chưa có FILE_CANCEL qua mạng, progress/status, login/logout/UI; chưa thử
+  socket thật. Hủy local chưa báo receiver ngay, receiver dùng timeout/close.
+  Thay đổi bài học hiện vẫn local, chưa commit/push.
+
+## Phần Khoa: ghi chunk và hoàn tất file — 28/10/2026
+
+- Nối FILE_CHUNK vào accept_chunk và FILE_END vào finish trong worker hiện
+  có của ClientService. Kiểm tra sender khớp chủ lượt nhận trước khi ghi/đóng.
+- Chỉ trả COMPLETE sau khi đủ chunk, đúng size/SHA-256 và lưu/dọn .part xong.
+  File rỗng được hỗ trợ. Lỗi trả ERROR và dọn lượt nhận; không xóa file hoàn
+  chỉnh nếu lỗi gửi COMPLETE hoặc lỗi dọn .part sau khi đã lưu file.
+- Cache kết quả COMPLETE/lỗi của CHUNK/END tối đa 120 giây, không gia hạn khi
+  gói lặp; giữ dấu ID đã dùng. END lặp không tạo lại file, chunk muộn sau khi
+  hoàn tất không được ghi thêm. Chưa thay thế vòng đời stream của Hải.
+- `python -m unittest discover -s tests -v`: 56 test PASS (13 test mới), gồm
+  trùng/sai thứ tự, thiếu chunk, sai hash/sender, file rỗng, cache hết hạn, lỗi
+  cleanup, hai lượt độc lập và chat trong lúc kiểm tra file.
+- Demo client_file_receive, client_file_offer, client_users, client_chat PASS.
+  Demo mới nhận đúng 1000 byte theo thứ tự 2,0,0,1, trả COMPLETE đúng size/hash,
+  END lặp trả lại cùng phản hồi. Dùng mock/thư mục tạm, không mở TCP/UDP.
+- send_file, xử lý ACCEPT/COMPLETE/ERROR phía gửi, CANCEL, tiến độ, login/logout
+  đầy đủ và HTTP/UI vẫn TODO. Thay đổi local chưa xác nhận đã lên GitHub.
+
+## Phần Khoa: chuẩn bị nhận file — 27/10/2026
+
+- Nối FILE_META → FileReceiver.begin → FILE_ACCEPT/ERROR vào ClientService.
+  Receiver được truyền bằng keyword, mặc định chưa bật nhận file. Ghi rõ
+  stream_id = transfer_id UUID hex 32 ký tự cho luồng file trong protocol.
+- Worker queue 8 META, I/O chạy trong thread theo thứ tự, không chặn chat khi
+  chờ chuẩn bị/gửi phản hồi. Hủy vòng nhận đợi I/O xong rồi dọn .part/quota.
+  Quét expire khi worker chạy; deadline gửi phản hồi 10s. ID đã dùng được giữ
+  có giới hạn để META muộn không tạo lại file; không thay state transport.
+- `python -m unittest discover -s tests -v`: 43 test PASS, thêm 16 test cho
+  metadata/quota/ERROR, chat trong lúc chờ, queue hữu hạn, timeout, shutdown,
+  lỗi cleanup và hủy giữa thao tác đĩa.
+- Demo client_file_offer, client_users, client_chat PASS qua mock. Demo offer
+  dùng thư mục tạm, kiểm tra .part trước ACCEPT, giữ lượt hợp lệ khi một META
+  khác sai, dọn file và quota khi dừng. Không mở TCP/UDP, chưa gửi chunk.
+- CHUNK/END/COMPLETE/CANCEL, nhận ERROR, tiến độ, send_file, login/logout đầy
+  đủ và UI/bridge vẫn cần làm. Chưa xác nhận thay đổi local đã lên GitHub.
+
+## Phần Khoa: nhận danh sách online — 27/10/2026
+
+- Thêm `client/user_list.py`: kiểm tra payload/schema/username, gom các trang
+  USER_LIST cùng revision, bỏ trang trùng/phiên bản cũ, giới hạn 128 trang và
+  1024 username; chỉ phát danh sách khi đầy đủ. Trang lỗi giữ nguyên state tốt.
+- Nối vào `ClientService.receive_events()`: kiểm tra peer/recipient/sender,
+  phát event users hoặc lỗi dữ liệu, tiếp tục nhận chat khi danh sách chưa đủ.
+- `python -m unittest discover -s tests -v`: 27 test PASS (11 test mới cho
+  USER_LIST/dispatcher và 16 test FileReceiver).
+- `python -m scripts.demo_client_users` và `python -m scripts.demo_client_chat`:
+  PASS qua MemoryTransport. Demo online đưa trang 1 đến trước trang 0 và nhận
+  chat ở giữa, không mở TCP/UDP.
+- Đây là thay đổi local, chưa xác nhận GitHub/máy Hải đã có. Server phát
+  USER_LIST, login/logout và reset assembler theo phiên mới, file dispatcher,
+  bridge/UI vẫn cần ghép; chưa đạt nghiệm thu mạng thật.
 
 ## Bổ sung theo review của Hải — 24/10/2026
 
@@ -66,11 +179,13 @@ Ba demo file/chat có assertion để exit khác 0 khi kết quả sai. Không d
 - Codec chưa encode/decode/validate packet mới; Transport.register_peer trong
   lớp thật chưa lưu mapping, ReliableUdpTransport/CongestionController vẫn stub.
 - Auth/session/BIND/router/heartbeat/online và socket TCP/UDP chưa triển khai.
-- Client login/send_file, USER_LIST/file/error dispatch chưa hoàn chỉnh.
-- FileReceiver đã được bổ sung theo review ở đầu file; còn nối dispatcher,
-  timer expire, cancel/error và shutdown của ClientService. Chưa xong K4/K5.
-- Queue event hữu hạn đã có nhưng chính sách backpressure/gộp progress và tách
-  worker đĩa chưa được ghép/test với mạng; UI/bridge vẫn TODO/fixture.
+- Client login chưa hoàn chỉnh. USER_LIST, nhận META/CHUNK/END/CANCEL,
+  send_file với ACCEPT/COMPLETE/ERROR/CANCEL và snapshot hai chiều đã có theo
+  các mục 27–28/10; server phát danh sách và vòng đời phiên chưa ghép.
+- FileReceiver đã nối worker nhận, snapshot và expire/shutdown; còn timeout
+  chủ động báo qua mạng về sender và nút hủy lượt nhận local. Chưa xong toàn bộ K4/K5.
+- Queue event hữu hạn, snapshot progress gộp và worker đĩa đã có nhưng chưa
+  được ghép/test với mạng; UI/bridge vẫn TODO/fixture.
 - T01–T22 trong [nghiệm thu](04_ACCEPTANCE.md) **chưa chạy trên ứng dụng thật**.
   Không suy từ mock ra đã đạt loss/ACK/retry/window/CUBIC, 10–20 client hoặc bảo mật.
 

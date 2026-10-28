@@ -141,7 +141,7 @@ class FileReceiver:
             with temp_path.open("xb"):
                 self.transfers[transfer_id] = {
                     "metadata": metadata, "temp_path": temp_path, "final_path": final_path,
-                    "received": set(), "last_progress": now, "failed": False,
+                    "received": set(), "received_bytes": 0, "last_progress": now, "failed": False,
                     "published": False,
                 }
         except Exception:
@@ -211,6 +211,7 @@ class FileReceiver:
                 if file.write(data) != len(data):
                     raise OSError("Ghi chunk không đủ byte")
             transfer["received"].add(index)
+            transfer["received_bytes"] += len(data)
             transfer["last_progress"] = self._clock()
         except Exception:
             self.cancel(transfer_id)

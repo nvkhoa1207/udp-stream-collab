@@ -279,10 +279,12 @@ hạn; không tuyên bố chống nghe lén hay giả mạo chủ động. Phầ
 |---|---|
 | Packet, MessageType, Transport, mock | Có; model thêm recv_limit và WINDOW_UPDATE/PROBE |
 | Chia file, build_metadata, FileReceiver | Có xử lý local: metadata/hash/quota, ghép/dedup, cancel/expire/close |
-| ClientService.send_chat và event MSG/USER_LIST | Có, chạy qua mock; file/error dispatcher chưa đủ |
-| demo_mock, demo_file_chunks, demo_client_chat, demo_file_receiver | Có trong cây nguồn |
+| ClientService.send_chat và event MSG/USER_LIST | Có, chạy qua mock; ERROR của chat chưa ghép |
+| ClientService nhận META/CHUNK/END/CANCEL | Có worker ghi/kiểm tra/dọn file, phản hồi/cache; snapshot byte đã ghi, hoàn tất/lỗi/hủy/hết hạn qua poll_file_updates |
+| ClientService.send_file | Có luồng gửi, ERROR/CANCEL, tối đa 8 chunk đồng thời; snapshot tiến độ/trạng thái qua poll_file_updates; đã thử với bên nhận qua mock |
+| Demo mock/chat/online/file local, demo_client_file_offer/receive/send | Có trong cây nguồn |
 | register_peer(peer, session_id) | Chữ ký đã bỏ khóa; xử lý đăng ký vẫn TODO |
-| Login/send_file, codec, server/auth/session/router | TODO |
+| Login, codec, server/auth/session/router | TODO |
 | Reliable UDP, flow control, CUBIC giản lược | Hợp đồng đã chốt; xử lý mạng vẫn TODO |
 | UI và bridge | HTML/JS fixture, nút disabled; bridge TODO |
 | PayloadCipher | Stub tùy chọn ngoài phạm vi bản đầu |
@@ -351,23 +353,35 @@ python -m scripts.demo_file_chunks
 `demo_file_chunks` tạo/ghi đè `data/demo_original.bin` và `data/demo_copy.bin`.
 Đây là file thử của demo, không dùng chúng để giữ dữ liệu riêng.
 
-### Demo client chat và FileReceiver
+### Demo client chat, danh sách online và FileReceiver
 
-Hai script đi cùng phần client/file trong cây nguồn này. Khi ghép, cả hai dùng
-cùng nhánh/commit theo [quy trình Git](docs/03_GIT_WORKFLOW.md).
+Các script đi cùng phần client/file trong cây nguồn này. Khi ghép, Khoa và Hải
+dùng cùng nhánh/commit theo [quy trình Git](docs/03_GIT_WORKFLOW.md).
 
 ```bash
 python -m scripts.demo_client_chat
+python -m scripts.demo_client_users
+python -m scripts.demo_client_file_offer
+python -m scripts.demo_client_file_receive
+python -m scripts.demo_client_file_send
+python -m scripts.demo_client_file_control
+python -m scripts.demo_client_receive_status
 python -m scripts.demo_file_receiver
 ```
 
 | Demo | Kết quả mong đợi | Phạm vi |
 |---|---|---|
 | demo_client_chat | friend nhận tin từ khoa | Gọi send_chat, receive_events và event queue; server vẫn chuyển tiếp giả |
+| demo_client_users | Nhận chat khi còn thiếu trang; đủ trang mới phát `khoa, hai` | USER_LIST qua mock; chưa có server phát danh sách qua UDP |
+| demo_client_file_offer | META hợp lệ → ACCEPT; tên sai → ERROR; dừng client dọn .part/quota | Mock và thư mục tạm, chưa gửi CHUNK/END |
+| demo_client_file_receive | Nhận 1000 byte qua CHUNK 2,0,0,1; END → COMPLETE, bytes/hash đúng; END lặp không tạo thêm file | Toàn nhánh nhận qua mock và thư mục tạm; chưa gọi send_file hoặc dùng UDP |
+| demo_client_file_send | Gọi send_file, truyền 5120 byte tới ClientService bên nhận, COMPLETE đúng size/hash | Hai client và relay bộ nhớ, thư mục tạm; chưa có socket/ACK thật |
+| demo_client_file_control | 100% vẫn verifying; COMPLETE mới completed; hủy tại 1920/5120 byte dọn .part/quota, giữ file đã hoàn tất | Mock cố ý chặn chunk/COMPLETE để minh họa progress và CANCEL; không có ACK thật |
+| demo_client_receive_status | Nhận 0/40/520/1000 byte, bỏ trùng; completed, expired và failed khi sai hash | Mock/thư mục tạm, đồng hồ giả cho timeout; không có UDP thật |
 | demo_file_receiver | Thứ tự `2, 0, 0, 1`, có 3 chunk khác nhau; hash khớp | Dùng FileReceiver để thử chunk trùng/sai thứ tự trên đĩa |
 
 `demo_file_receiver` tạo/ghi đè `data/demo_original.bin`, lưu kết quả ở
-`data/received/`, mỗi lần chạy dùng transfer ID mới. Cả bốn demo **không mở
+`data/received/`, mỗi lần chạy dùng transfer ID mới. Các demo này **không mở
 socket TCP/UDP**, không kiểm tra mất gói hoặc chứng minh truyền qua LAN.
 
 ### Entrypoint server/client
@@ -485,8 +499,3 @@ Theo đề, nộp ZIP hoặc liên kết GitHub private, chứa:
 Trước khi nộp, thử lại trên máy còn lại và kiểm tra hình thức nộp/trạng thái repo.
 Không đưa `.venv`, dữ liệu cá nhân, mật khẩu, private key hoặc khóa phiên vào
 bản nộp. Báo cáo ghi đúng tính năng đã chạy và giới hạn còn lại.
-
-### Demo danh sách online
-
-Chạy `python -m scripts.demo_client_users`: ghép USER_LIST nhiều trang, vẫn
-nhận chat khi thiếu trang. Chỉ dùng mock trong một process, chưa có UDP thật.
