@@ -238,3 +238,11 @@ của Hải còn stub. Bridge/UI và entrypoint là commit tiếp theo.
 Bridge/runtime có API phiên/chat/file/cancel/polling, Host/Origin/token, upload
 16 MiB và 4 job, ring 512 event. 117 test PASS (5 mới: runtime, cleanup, HTTP
 đầu vào/nguồn). UI thật và entrypoint được nối ở commit tiếp theo.
+
+## Commit UI/entrypoint — 28/10/2026
+
+Form login, online/chat, file/progress/cancel hai chiều nối HTTP API, không còn
+fixture. client.main mở localhost UI; password chỉ nhập form. 117 test PASS,
+node --check PASS. Browser localhost: form hoạt động, login báo đúng transport
+stub (503), chat/file vẫn disabled; ảnh reports/client-ui-check.png. Chưa có
+bằng chứng UI chat/file qua mạng thật vì phụ thuộc Hải.
