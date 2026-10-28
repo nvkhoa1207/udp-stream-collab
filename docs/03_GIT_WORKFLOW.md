@@ -24,6 +24,22 @@ local; không chứng minh mạng thật. Xem [tiến độ](06_TIEN_DO.md) đ�
 
 ## Nhánh phát triển và commit
 
+### Quy trình Khoa yêu cầu từ 28/10/2026
+
+Mỗi phần chức năng hoàn tất phải đi theo thứ tự: code → kiểm tra → commit →
+push nhánh làm việc riêng, rồi mới bắt đầu phần tiếp theo. Không gom nhiều bài
+học đã xong thành một đợt thay đổi local kéo dài. Mỗi commit phải chạy độc lập,
+gồm code, test/demo liên quan và tài liệu API/trạng thái nếu có thay đổi.
+
+Nhánh đang sử dụng là `codex/align-protocol-docs`; push nhánh này, không tự merge
+vào main hoặc force-push. Sau mỗi push, ghi hash, nội dung và kết quả kiểm tra
+cho người dùng. Nếu push thất bại, giữ commit local và báo rõ, không nói đã đồng bộ.
+Chọn file cụ thể; không tự đưa `output/`, dữ liệu thử hoặc bài học rời vào commit
+chức năng. Đợt tồn đọng ngày 28/10 được tách thành USER_LIST và luồng file đang
+dùng chung dispatcher; các phần mới sau đó tiếp tục chia nhỏ theo chức năng.
+
+### Phân nhánh dự kiến của nhóm
+
 - Hải: `feature/server-transport`.
 - Khoa: `feature/client-file-ui`.
 - `main`: phiên bản hai người đã review, ghép và chạy thử.
