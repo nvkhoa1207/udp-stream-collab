@@ -1,5 +1,16 @@
 # Tiến độ và kết quả theo phiên bản
 
+## Báo hết hạn chủ động về sender — 28/10/2026
+
+- Khi expire dọn thành công, ERROR FILE_EXPIRED đi control, liên hệ META gốc.
+  Cũng xử lý expire bên trong begin file mới; mỗi thông báo được lấy gửi một lần.
+- Cache ERROR để END muộn nhận lại cùng kết quả; giữ dấu ID chống mở lại.
+  Gửi thông báo có deadline 10s; lỗi vẫn truyền ra caller và cleanup worker.
+- 101 test PASS, gồm thông báo đúng META/người nhận, không phát lặp, expire
+  ngầm khi mở file, shutdown và lỗi gửi thông báo. Demo_client_receive_status
+  PASS với ERROR FILE_EXPIRED; vẫn mock/đồng hồ giả, chưa UDP thật.
+- Còn login/logout, nút hủy nhận local, HTTP/UI và tích hợp mạng với Hải.
+
 ## Đóng gói các bài học thành commit — 28/10/2026
 
 - USER_LIST: commit `bab2dd0`, snapshot riêng qua 27 test cùng demo_client_users
@@ -182,8 +193,7 @@ Ba demo file/chat có assertion để exit khác 0 khi kết quả sai. Không d
 - Client login chưa hoàn chỉnh. USER_LIST, nhận META/CHUNK/END/CANCEL,
   send_file với ACCEPT/COMPLETE/ERROR/CANCEL và snapshot hai chiều đã có theo
   các mục 27–28/10; server phát danh sách và vòng đời phiên chưa ghép.
-- FileReceiver đã nối worker nhận, snapshot và expire/shutdown; còn timeout
-  chủ động báo qua mạng về sender và nút hủy lượt nhận local. Chưa xong toàn bộ K4/K5.
+- FileReceiver đã nối worker nhận, snapshot và expire/shutdown; còn nút hủy lượt nhận local. Chưa xong toàn bộ K4/K5.
 - Queue event hữu hạn, snapshot progress gộp và worker đĩa đã có nhưng chưa
   được ghép/test với mạng; UI/bridge vẫn TODO/fixture.
 - T01–T22 trong [nghiệm thu](04_ACCEPTANCE.md) **chưa chạy trên ứng dụng thật**.

@@ -132,12 +132,14 @@ class ClientService:
         try:
             while True:
                 await self._file_io(self.file_offers.expire)
+                await self._send_file_notifications()
                 try:
                     packet = await asyncio.wait_for(self._file_queue.get(), timeout=1)
                 except TimeoutError:
                     continue
                 try:
                     reply = await self._file_io(self.file_offers.handle, packet)
+                    await self._send_file_notifications()
                     if reply is not None:
                         delivered = False
                         try:
@@ -158,6 +160,11 @@ class ClientService:
                 while not self._file_queue.empty():
                     self._file_queue.get_nowait()
                     self._file_queue.task_done()
+
+    async def _send_file_notifications(self) -> None:
+        for reply in await self._file_io(self.file_offers.take_notifications):
+            await asyncio.wait_for(self.transport.send(self.server_peer, reply),
+                                   timeout=FILE_REPLY_TIMEOUT_SECONDS)
 
     async def _receive_loop(self) -> None:
         while True:

@@ -184,8 +184,9 @@ dấu flow control hoàn thành chỉ vì constructor Packet nhận được fie
   được thay đổi snapshot của lượt đang chạy.
 - Hết hạn không có chunk mới trong 45s (mặc định) → expired/FILE_EXPIRED sau khi
   dọn thành công. Đồng bộ cả expire định kỳ và expire bên trong begin file mới.
-  Chunk trùng không kéo deadline. Đây là thông báo local để UI polling; chưa có
-  ERROR chủ động gửi về sender khi timer chạy, sender vẫn dùng timeout của nó.
+  Chunk trùng không kéo deadline. Sau dọn thành công, worker gửi ERROR FILE_EXPIRED
+  qua control với related_message_id của META gốc. Sender nhận đúng ID sẽ dừng
+  lượt gửi; vẫn có deadline riêng nếu thông báo mất hoặc không tới.
 - Hủy từ xa → cancelled/FILE_CANCELLED; đóng client khi còn nhận dở →
   cancelled/CLIENT_CLOSED. Lỗi unlink → failed/FILE_STORAGE_ERROR và
   cleanup_pending=true; giữ snapshot/quota để retry. Sau expire/close thành công,
@@ -240,8 +241,13 @@ thêm mã hóa, MSG_DELIVERED hay module mới để đáp ứng một bản đ�
   Không gọi trực tiếp FileReceiver từ worker khác khi nó thuộc ClientService.
 - Worker quét expire trước mỗi lượt xử lý và sau tối đa 1 giây chờ queue rỗng;
   lúc đang xử lý/gửi phản hồi, lần quét kế tiếp chờ thao tác đó kết thúc. Deadline
-  gửi ACCEPT/COMPLETE/ERROR là 10 giây. Timer cập nhật snapshot hết hạn local;
-  chưa gửi thông báo timeout chủ động qua mạng về người gửi.
+  gửi ACCEPT/COMPLETE/ERROR là 10 giây. Timer cập nhật snapshot hết hạn local
+  và chủ động báo ERROR về sender, kể cả lượt được dọn khi begin file mới.
+  take_notifications() lấy thông báo một lần trên worker; retry thuộc transport.
+  Hàng đợi được chặn bởi quota 4096 ID/phiên; worker xả sau expire/handle. Kết
+  quả lỗi cache 120s, không gia hạn vì END lặp; dấu ID giữ tới hết phiên. Nếu
+  gửi thông báo timeout lỗi/quá hạn, vòng nhận fail và cleanup như lỗi gửi phản
+  hồi khác; nếu bản thân cleanup lỗi thì không khẳng định đã dọn/hết quota.
 - `receive_events()` chạy một lần mỗi instance/phiên. Hủy và await task này
   sẽ dừng worker, chờ I/O đang chạy trước khi close FileReceiver, bỏ gói file còn
   trong queue. Caller đóng transport sau đó. Lỗi gửi phản hồi/cleanup làm vòng

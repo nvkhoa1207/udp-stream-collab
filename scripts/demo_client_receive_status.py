@@ -73,6 +73,9 @@ async def main():
             await start(transfer_id, metadata)
             now = 46.0  # Đồng hồ giả: không phải đợi 45 giây trong demo.
             await wait_update(transfer_id, lambda u: u["status"] == "expired")
+            timeout_reply = await reply()
+            assert json.loads(timeout_reply.payload)["code"] == "FILE_EXPIRED"
+            print("Bên gửi nhận ERROR FILE_EXPIRED qua control.")
 
             transfer_id = uuid4().hex
             await start(transfer_id, dict(metadata, sha256="0" * 64))

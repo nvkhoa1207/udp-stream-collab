@@ -280,7 +280,7 @@ hạn; không tuyên bố chống nghe lén hay giả mạo chủ động. Phầ
 | Packet, MessageType, Transport, mock | Có; model thêm recv_limit và WINDOW_UPDATE/PROBE |
 | Chia file, build_metadata, FileReceiver | Có xử lý local: metadata/hash/quota, ghép/dedup, cancel/expire/close |
 | ClientService.send_chat và event MSG/USER_LIST | Có, chạy qua mock; ERROR của chat chưa ghép |
-| ClientService nhận META/CHUNK/END/CANCEL | Có worker ghi/kiểm tra/dọn file, phản hồi/cache; snapshot byte đã ghi, hoàn tất/lỗi/hủy/hết hạn qua poll_file_updates |
+| ClientService nhận META/CHUNK/END/CANCEL | Có worker ghi/kiểm tra/dọn file, phản hồi/cache; snapshot byte đã ghi, hoàn tất/lỗi/hủy/hết hạn; báo ERROR chủ động khi expire |
 | ClientService.send_file | Có luồng gửi, ERROR/CANCEL, tối đa 8 chunk đồng thời; snapshot tiến độ/trạng thái qua poll_file_updates; đã thử với bên nhận qua mock |
 | Demo mock/chat/online/file local, demo_client_file_offer/receive/send | Có trong cây nguồn |
 | register_peer(peer, session_id) | Chữ ký đã bỏ khóa; xử lý đăng ký vẫn TODO |
