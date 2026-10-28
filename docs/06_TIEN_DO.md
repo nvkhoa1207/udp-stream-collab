@@ -264,3 +264,7 @@ Merge origin/codex/align-protocol-docs 2999d08 vào hai/server-transport. Client
 ## Hải — giai đoạn 2
 UDP endpoint hữu hạn, bootstrap BIND/BIND_OK, kiểm tra session/sender/IP/endpoint trước online, idempotent cùng endpoint. Test UDP loopback mất reply, lặp, sai endpoint/identity, expired và malformed: regression 172 tests, 171 pass, 1 skip. Chưa có reliable DATA ở mốc này.
 
+
+## Hải — giai đoạn 3
+Selective ACK theo stream/chiều, retry hữu hạn backoff tối đa 4s, dedup và fail stream khi mất sequence. Không ACK dữ liệu session policy từ chối. Pending sends được đánh thức khi remove/close. Regression 176 tests: 175 pass, 1 skip; fault injection quanh UDP loopback thật, không phải netem.
+
