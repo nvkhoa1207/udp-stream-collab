@@ -4,7 +4,9 @@ import asyncio
 import logging
 
 from common.codec import encode_tcp_record, read_tcp_record
-from common.config import TCP_PORT
+from common.config import TCP_PORT, UDP_PORT
+from server.auth import AuthService
+from server.sessions import SessionRegistry
 
 
 logger = logging.getLogger(__name__)
@@ -17,12 +19,23 @@ class ServerApp:
         tcp_port: int = TCP_PORT,
         handshake_timeout: float = 10.0,
         max_clients: int = 100,
+        *,
+        auth: AuthService | None = None,
+        sessions: SessionRegistry | None = None,
+        udp_port: int = UDP_PORT,
     ) -> None:
         if type(tcp_port) is not int or not 0 <= tcp_port <= 65535:
             raise ValueError("Cổng TCP không hợp lệ")
 
         if handshake_timeout <= 0 or max_clients <= 0:
             raise ValueError("Timeout và giới hạn client phải dương")
+
+        if type(udp_port) is not int or not 1 <= udp_port <= 65535:
+            raise ValueError("Cổng UDP không hợp lệ")
+
+        self.auth = auth if auth is not None else AuthService()
+        self.sessions = sessions if sessions is not None else SessionRegistry()
+        self.udp_port = udp_port
 
         self.host = host
         self.tcp_port = tcp_port
@@ -111,7 +124,7 @@ class ServerApp:
                 timeout=self.handshake_timeout,
             )
 
-            # A3 sẽ tiếp tục đọc AUTH tại đây.
+            await self._authenticate(reader, writer)
 
         except (
             ValueError,
@@ -133,6 +146,72 @@ class ServerApp:
                 pass
 
             self._writers.discard(writer)
+
+
+    async def _authenticate(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        record = await read_tcp_record(reader, self.handshake_timeout)
+        session_id = None
+        delivered = False
+
+        try:
+            valid = (
+                set(record) == {"type", "username", "password"}
+                and record["type"] == "AUTH"
+                and isinstance(record["username"], str)
+                and isinstance(record["password"], str)
+            )
+
+            if not valid:
+                response = {
+                    "type": "AUTH_ERROR",
+                    "code": "BAD_AUTH",
+                    "message": "Record AUTH không hợp lệ",
+                }
+
+            elif not await self.auth.verify(
+                record["username"], record["password"]
+            ):
+                response = {
+                    "type": "AUTH_ERROR",
+                    "code": "INVALID_CREDENTIALS",
+                    "message": "Sai tài khoản hoặc mật khẩu",
+                }
+
+            else:
+                peer = writer.get_extra_info("peername")
+
+                try:
+                    session_id = self.sessions.create(
+                        record["username"], peer[0]
+                    )
+                except ValueError:
+                    response = {
+                        "type": "AUTH_ERROR",
+                        "code": "SESSION_UNAVAILABLE",
+                        "message": "Tài khoản đang sử dụng hoặc server đầy",
+                    }
+                else:
+                    response = {
+                        "type": "AUTH_OK",
+                        "session_id": session_id,
+                        "udp_port": self.udp_port,
+                    }
+
+            writer.write(encode_tcp_record(response))
+            await asyncio.wait_for(
+                writer.drain(),
+                timeout=self.handshake_timeout,
+            )
+            delivered = True
+
+        finally:
+            if session_id is not None and not delivered:
+                self.sessions.remove(session_id)
+
 
     async def close(self) -> None:
         if self._server is not None:
