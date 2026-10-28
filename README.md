@@ -365,6 +365,7 @@ python -m scripts.demo_client_file_offer
 python -m scripts.demo_client_file_receive
 python -m scripts.demo_client_file_send
 python -m scripts.demo_client_file_control
+python -m scripts.demo_client_file_control --receiver-cancel
 python -m scripts.demo_client_receive_status
 python -m scripts.demo_file_receiver
 ```

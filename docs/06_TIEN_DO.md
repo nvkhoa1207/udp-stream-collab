@@ -1,5 +1,18 @@
 # Tiến độ và kết quả theo phiên bản
 
+## Người nhận chủ động hủy file — 28/10/2026
+
+- Thêm cancel_receive_file(id), xử lý qua cùng worker/queue hữu hạn. Dọn .part,
+  trả quota rồi báo CANCEL control về sender; không xóa file đã hoàn tất.
+- Snapshot có cancel_delivery; lỗi gửi không dừng các lượt khác, lỗi dọn giữ
+  cleanup_pending/quota. Shutdown không bỏ người gọi chờ vô hạn.
+- 107 test PASS (6 mới), gồm hủy/ID sai, file hoàn tất, gửi CANCEL timeout,
+  unlink lỗi, queue đầy và shutdown giữa thao tác đĩa. Demo file_control với
+  --receiver-cancel PASS: người nhận hủy tại 1920/5120 byte, sender dừng,
+  không còn .part/quota, file hoàn tất trước đó vẫn nguyên vẹn.
+- Còn login/logout, HTTP/UI và ghép transport/server thật với Hải. Đây là
+  kiểm thử mock/local, chưa nghiệm thu mạng thật.
+
 ## Báo hết hạn chủ động về sender — 28/10/2026
 
 - Khi expire dọn thành công, ERROR FILE_EXPIRED đi control, liên hệ META gốc.
@@ -193,7 +206,7 @@ Ba demo file/chat có assertion để exit khác 0 khi kết quả sai. Không d
 - Client login chưa hoàn chỉnh. USER_LIST, nhận META/CHUNK/END/CANCEL,
   send_file với ACCEPT/COMPLETE/ERROR/CANCEL và snapshot hai chiều đã có theo
   các mục 27–28/10; server phát danh sách và vòng đời phiên chưa ghép.
-- FileReceiver đã nối worker nhận, snapshot và expire/shutdown; còn nút hủy lượt nhận local. Chưa xong toàn bộ K4/K5.
+- FileReceiver đã nối worker nhận, snapshot và expire/shutdown; đã có API hủy lượt nhận local; chưa ghép UI/mạng thật để nghiệm thu K4/K5.
 - Queue event hữu hạn, snapshot progress gộp và worker đĩa đã có nhưng chưa
   được ghép/test với mạng; UI/bridge vẫn TODO/fixture.
 - T01–T22 trong [nghiệm thu](04_ACCEPTANCE.md) **chưa chạy trên ứng dụng thật**.

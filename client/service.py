@@ -2,6 +2,7 @@
 
 import asyncio
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from common.config import MAX_PAYLOAD_BYTES
@@ -16,6 +17,13 @@ from client.user_list import UserListAssembler
 
 FILE_OFFER_QUEUE_SIZE = 8
 FILE_REPLY_TIMEOUT_SECONDS = 10.0
+LOCAL_CANCEL_TIMEOUT_SECONDS = 3.0
+
+
+@dataclass
+class ReceiveCancel:
+    transfer_id: str
+    result: asyncio.Future
 
 
 class ClientService:
@@ -33,6 +41,7 @@ class ClientService:
         self._file_queue = asyncio.Queue(maxsize=FILE_OFFER_QUEUE_SIZE)
         self._receive_started = False
         self._receiving = False
+        self._file_worker_running = False
         self._file_sender = None
         self._sent_file_count = 0
 
@@ -118,6 +127,39 @@ class ClientService:
             if self._file_sender is not None:
                 self._file_sender.fail(ConnectionError("Vòng nhận đã dừng khi đang gửi file"))
 
+    async def cancel_receive_file(self, transfer_id: str) -> bool:
+        """True: worker đã xử lý yêu cầu; xem snapshot để biết cleanup/gửi CANCEL."""
+        if type(transfer_id) is not str or re.fullmatch(r"[0-9a-f]{32}", transfer_id) is None:
+            raise ValueError("Transfer ID không hợp lệ")
+        if not self._receiving or not self._file_worker_running:
+            raise RuntimeError("Vòng nhận chưa chạy hoặc đã dừng")
+        result = asyncio.get_running_loop().create_future()
+        try:
+            self._file_queue.put_nowait(ReceiveCancel(transfer_id, result))
+        except asyncio.QueueFull:
+            raise RuntimeError("Worker nhận đang bận; hãy thử hủy lại") from None
+        return await result
+
+    async def _cancel_receive(self, request: ReceiveCancel):
+        if request.result.cancelled():
+            return  # Caller bỏ yêu cầu trước khi worker bắt đầu.
+        reply = await self._file_io(self.file_offers.cancel_local, request.transfer_id)
+        if reply is None:
+            if not request.result.done():
+                request.result.set_result(False)
+            return
+        delivery = "failed"
+        try:
+            await asyncio.wait_for(self.transport.send(self.server_peer, reply),
+                                   timeout=LOCAL_CANCEL_TIMEOUT_SECONDS)
+            delivery = "sent_to_server"
+        except Exception:
+            pass  # Snapshot báo gửi hủy lỗi; không làm dừng các lượt nhận khác.
+        finally:
+            await self._file_io(self.file_offers.note_local_cancel, request.transfer_id, delivery)
+        if not request.result.done():
+            request.result.set_result(True)
+
     async def _file_io(self, function, *args):
         # Hủy coroutine không tự dừng thread. Chờ thao tác đĩa kết thúc trước
         # khi worker chuyển sang close(), tránh begin() tạo .part sau cleanup.
@@ -129,6 +171,7 @@ class ClientService:
             raise
 
     async def _receive_file_offers(self) -> None:
+        self._file_worker_running = True
         try:
             while True:
                 await self._file_io(self.file_offers.expire)
@@ -138,6 +181,13 @@ class ClientService:
                 except TimeoutError:
                     continue
                 try:
+                    if isinstance(packet, ReceiveCancel):
+                        try:
+                            await self._cancel_receive(packet)
+                        finally:
+                            if not packet.result.done():
+                                packet.result.set_exception(ConnectionError("Worker dừng khi đang xử lý hủy"))
+                        continue
                     reply = await self._file_io(self.file_offers.handle, packet)
                     await self._send_file_notifications()
                     if reply is not None:
@@ -153,12 +203,15 @@ class ClientService:
                 finally:
                     self._file_queue.task_done()
         finally:
+            self._file_worker_running = False
             # Lỗi gửi phản hồi/cleanup được truyền về caller, không báo thành công.
             try:
                 await self._file_io(self.file_offers.close)
             finally:
                 while not self._file_queue.empty():
-                    self._file_queue.get_nowait()
+                    pending = self._file_queue.get_nowait()
+                    if isinstance(pending, ReceiveCancel) and not pending.result.done():
+                        pending.result.set_exception(ConnectionError("Worker đã dừng trước khi xử lý hủy"))
                     self._file_queue.task_done()
 
     async def _send_file_notifications(self) -> None:

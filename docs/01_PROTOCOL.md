@@ -254,7 +254,9 @@ có lỗi/timeout hoặc hủy task thì cũng thử báo CANCEL, deadline 3s. A
 server của CANCEL không xác nhận bên nhận đã dọn xong. Nếu báo hủy thất bại,
 receiver vẫn có timeout/close; caller nhận lỗi/status, không báo thành công giả.
 
-Receiver kiểm tra chủ lượt truyền trước khi hủy, dọn .part và trả quota. CANCEL
+Receiver kiểm tra chủ lượt truyền trước khi hủy, dọn .part và trả quota.
+Người nhận cũng có thể chủ động hủy qua worker: gửi CANCEL control về sender
+gốc; sender đối chiếu người gửi/transfer_id rồi dừng, không gửi CANCEL đáp lại. CANCEL
 có thể vượt META vì khác stream: giữ ID đã hủy tới hết phiên (trong quota 4096),
 META muộn không được tạo file. Lỗi FILE_CANCELLED được cache 120s như lỗi file
 khác; CANCEL lặp không kéo dài cache. Nếu đã COMPLETE, giữ nguyên file cuối và

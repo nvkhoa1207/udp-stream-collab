@@ -24,7 +24,8 @@ gửi nhóm tối đa 8 chunk, chờ COMPLETE đúng size/hash, nhận ERROR đ�
 Hai phía đã chạy cùng nhau qua mock. Đã có snapshot tiến độ hai chiều và hủy bằng
 FILE_CANCEL; CANCEL sớm không cho META tạo file muộn, CANCEL muộn giữ file đã xong.
 Phía nhận có completed/failed/cancelled/expired và thông tin còn phải dọn file.
-K4 còn kiểm thử mạng thật; K1/K6 chưa tích hợp, nút hủy nhận local chưa có.
+K4 còn kiểm thử mạng thật; K1/K6 chưa tích hợp. API hủy nhận local đã có,
+chưa nối nút trên giao diện.
 Chưa tick nghiệm thu chỉ dựa vào mock. Xem [tiến độ](docs/06_TIEN_DO.md).
 
 ## Thứ tự bắt đầu

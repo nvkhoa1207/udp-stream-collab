@@ -162,7 +162,7 @@ dấu flow control hoàn thành chỉ vì constructor Packet nhận được fie
   muộn, không xóa file đã hoàn tất. Có thể trả ERROR FILE_CANCELLED hoặc kết quả
   COMPLETE đã cache. Hủy và hoàn tất có thể chạy đua; cancelled ở sender không
   có nghĩa file hoàn chỉnh trên máy nhận đã bị xóa.
-- Chưa có API nút hủy lượt nhận ở local. Snapshot nhận mô tả ở phần dưới.
+- Hủy lượt nhận ở local dùng cancel_receive_file, mô tả ở phần dưới.
   Demo `python -m scripts.demo_client_file_control` chứng minh tiến độ/hủy qua mock.
 
 ### Tiến độ và lỗi phía nhận
@@ -302,3 +302,25 @@ phục hồi transfer hoặc tự xóa file mồ côi của phiên/process trư�
 Quota FileReceiver và quota stream độc lập. Hải triển khai thu hồi buffer khi
 stream CLOSED, giữ dấu chống trùng nhỏ đến hết phiên theo protocol mục 6.1.
 Client dispatcher/timer chưa ghép; các API local này chưa chứng minh file mạng.
+
+### Người nhận chủ động hủy file
+
+- `await cancel_receive_file(transfer_id) -> bool` đưa yêu cầu vào cùng queue
+  8 phần tử của worker nhận, không gọi FileReceiver trực tiếp từ UI. Worker
+  xử lý tuần tự sau các việc đã xếp hàng, không ngắt ngang thao tác ghi/hash.
+- ID phải là 32 hex thường; cần vòng nhận và worker đang chạy. Queue đầy báo
+  RuntimeError để caller thử lại, không tạo hàng đợi yêu cầu hủy vô hạn.
+- False nếu không còn lượt nhận đang hoạt động (gồm chưa có META hoặc đã hoàn
+  tất). True nếu worker đã xử lý yêu cầu; đọc snapshot để biết cleanup/gửi hủy.
+  File đã hoàn tất giữ nguyên, không bị xóa khi người dùng bấm hủy muộn.
+- Worker dọn .part và gửi FILE_CANCEL qua control tới sender gốc, deadline 3s.
+  Snapshot receive có cancel_delivery pending/sent_to_server/failed. Gửi thất
+  bại không dừng các lượt nhận khác; sent_to_server không xác nhận đầu xa đã
+  xử lý. Lỗi unlink vẫn báo sender dừng, giữ failed/cleanup_pending và quota
+  để expire/close retry. Cache FILE_CANCELLED ngăn chunk muộn tiếp tục ghi.
+- Poll giữ snapshot khi cancel_delivery=pending. Client dừng sẽ giải quyết
+  các yêu cầu đang chờ bằng ConnectionError, dọn tài nguyên và kết thúc trạng
+  thái pending. Caller hủy task yêu cầu trước khi worker bắt đầu thì bỏ yêu
+  cầu; nếu đã bắt đầu thì worker tiếp tục cleanup/báo hủy.
+- Demo: `python -m scripts.demo_client_file_control --receiver-cancel`.
+  Đây là API core qua mock; nút trên HTTP/UI vẫn chưa triển khai.
