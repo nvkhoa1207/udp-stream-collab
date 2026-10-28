@@ -48,3 +48,48 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(NotImplementedError):
             await runtime.login(dict(host='localhost',port=9000,username='khoa',password='secret'))
         self.assertFalse((await runtime.poll(0))['connected'])
+
+    async def test_runtime_upload_through_two_real_client_services_with_mock_transport(self):
+        from client.service import ClientService
+        from client.files import FileReceiver
+        from mocks.memory_transport import MemoryHub, MemoryTransport
+        hub = MemoryHub()
+        server = MemoryTransport(hub, ('server', 1))
+        local = MemoryTransport(hub, ('khoa', 2))
+        remote = MemoryTransport(hub, ('hai', 3))
+        for transport in (server, local, remote):
+            await transport.start()
+        with tempfile.TemporaryDirectory() as folder:
+            receiver = FileReceiver(Path(folder))
+            khoa = ClientService(local, server.address, 'khoa')
+            hai = ClientService(remote, server.address, 'hai', file_receiver=receiver)
+            runtime = ClientRuntime(Path(folder))
+            runtime.client = khoa
+            khoa.session_id = 'mock-session'
+            async def relay():
+                while True:
+                    packet = (await server.receive()).packet
+                    await server.send(remote.address if packet.recipient == 'hai' else local.address, packet)
+            tasks = [asyncio.create_task(khoa.receive_events()), asyncio.create_task(hai.receive_events()),
+                     asyncio.create_task(relay()), asyncio.create_task(runtime.collect())]
+            owner = tempfile.TemporaryDirectory()
+            source = Path(owner.name) / 'upload.bin'
+            source.write_bytes(b'abc' * 1000)
+            try:
+                await asyncio.sleep(0)
+                await runtime.upload('hai', source, owner)
+                await asyncio.wait_for(asyncio.gather(*list(runtime.jobs)), timeout=3)
+                await asyncio.sleep(0.15)
+                events = (await runtime.poll(0))['events']
+                self.assertTrue(any(e.get('status') == 'completed' for e in events))
+                files = list(Path(folder).iterdir())
+                self.assertEqual(len(files), 1)
+                self.assertEqual(files[0].read_bytes(), b'abc' * 1000)
+                self.assertFalse(Path(owner.name).exists())
+            finally:
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                owner.cleanup()
+        for transport in (local, remote, server):
+            await transport.close()

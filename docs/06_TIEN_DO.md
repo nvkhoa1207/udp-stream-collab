@@ -1,5 +1,15 @@
 # Tiến độ và kết quả theo phiên bản
 
+## Chốt phần code Khoa và bàn giao — 28/10/2026
+
+- K1–K6 có code client/UI; K8 có báo cáo phần Khoa, README và ảnh browser.
+- Suite 119 ca: 118 PASS, 1 TCP opt-in skip; chạy riêng TCP loopback thật PASS.
+  Thêm runtime upload qua hai ClientService với relay mock, hash/cleanup đúng.
+- K7 mạng thật còn chờ server/transport/codec của Hải; chưa đánh dấu đạt LAN,
+  loss/ACK/window/CUBIC hoặc UI chat/file mạng thật. Xem reports/KHOA_REPORT.md.
+- Commit/push từng phần trên codex/align-protocol-docs, chưa merge main.
+
+
 ## Người nhận chủ động hủy file — 28/10/2026
 
 - Thêm cancel_receive_file(id), xử lý qua cùng worker/queue hữu hạn. Dọn .part,
