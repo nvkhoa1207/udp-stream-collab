@@ -226,3 +226,9 @@ mới trong ngày 23/10 và không mô tả main hiện tại:
 Bảng này được giữ để giải thích nhận xét “code mới chỉ ở máy Khoa”. README chính
 hiện mô tả source đi cùng phiên bản tài liệu, không dùng mốc 463c8b3 làm tiến độ
 mới. Chỉ sau review/merge mới cập nhật main và xác nhận Hải đã lấy đúng commit.
+
+## Commit login/lifecycle — 28/10/2026
+
+ClientService.login có TCP HELLO/AUTH, BIND, heartbeat và logout. 112 test PASS
+(5 mới cho record TCP, BIND và lifecycle). Chưa chạy mạng thật do transport/server
+của Hải còn stub. Bridge/UI và entrypoint là commit tiếp theo.

@@ -1,0 +1,75 @@
+"""TCP HELLO/AUTH và bootstrap BIND; không tự tạo socket UDP thứ hai."""
+import asyncio
+import json
+import re
+from common.config import MAX_TCP_RECORD_BYTES
+from common.models import MessageType, Packet
+
+
+async def read_record(reader):
+    size = int.from_bytes(await reader.readexactly(4), 'big')
+    if not 1 <= size <= MAX_TCP_RECORD_BYTES:
+        raise ValueError('Độ dài record TCP không hợp lệ')
+    value = json.loads((await reader.readexactly(size)).decode('utf-8'))
+    if type(value) is not dict:
+        raise ValueError('Record TCP phải là object')
+    return value
+
+
+async def write_record(writer, value):
+    body = json.dumps(value).encode('utf-8')
+    if len(body) > MAX_TCP_RECORD_BYTES:
+        raise ValueError('Record TCP quá lớn')
+    writer.write(len(body).to_bytes(4, 'big') + body)
+    await writer.drain()
+
+
+async def authenticate(peer, username, password):
+    if re.fullmatch(r'[A-Za-z0-9_-]{1,32}', username) is None:
+        raise ValueError('Username không hợp lệ')
+    if type(password) is not str or not password or len(password.encode()) > 4096:
+        raise ValueError('Mật khẩu rỗng hoặc quá dài')
+    async with asyncio.timeout(8):
+        reader, writer = await asyncio.open_connection(*peer)
+        try:
+            await write_record(writer, dict(type='HELLO', version=1, client_name='khoa-client'))
+            hello = await read_record(reader)
+            if (set(hello) != {'type', 'version', 'server_name'} or hello['type'] != 'HELLO_ACK'
+                    or type(hello['version']) is not int or hello['version'] != 1
+                    or type(hello['server_name']) is not str):
+                raise ValueError('HELLO_ACK không hợp lệ')
+            await write_record(writer, dict(type='AUTH', username=username, password=password))
+            response = await read_record(reader)
+            if response.get('type') == 'AUTH_ERROR':
+                raise PermissionError('Đăng nhập bị từ chối')
+            if (set(response) != {'type', 'session_id', 'udp_port'} or response['type'] != 'AUTH_OK'
+                    or type(response['session_id']) is not str
+                    or re.fullmatch(r'[0-9a-f]{32}', response['session_id']) is None
+                    or type(response['udp_port']) is not int or not 1 <= response['udp_port'] <= 65535):
+                raise ValueError('AUTH_OK không hợp lệ')
+            host = writer.get_extra_info('peername')[0]
+            return (host, response['udp_port']), response['session_id']
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+
+async def bind_session(transport, peer, username, session_id):
+    packet = Packet(kind=MessageType.BIND, sender=username, recipient='server',
+                    stream_id='control', session_id=session_id)
+    async with asyncio.timeout(9):
+        for _ in range(9):
+            await asyncio.wait_for(transport.send(peer, packet), timeout=0.5)
+            try:
+                async with asyncio.timeout(0.5):
+                    while True:
+                        received = await transport.receive()
+                        reply = received.packet
+                        if (received.peer == peer and reply.kind == MessageType.BIND_OK
+                                and reply.sender == 'server' and reply.recipient == username
+                                and reply.session_id == session_id and reply.stream_id == 'control'
+                                and reply.seq == 0 and reply.payload == b'' and reply.chunk_index is None):
+                            return
+            except TimeoutError:
+                pass
+    raise TimeoutError('Không nhận được BIND_OK')

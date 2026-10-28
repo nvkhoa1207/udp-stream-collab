@@ -11,6 +11,7 @@ from common.models import MessageType, Packet, Peer
 from client.file_offers import FileOfferReceiver
 from client.file_sender import FileSender
 from client.file_updates import FileUpdates
+from client.auth import authenticate, bind_session
 from client.files import FileReceiver
 from client.user_list import UserListAssembler
 
@@ -29,8 +30,12 @@ class ReceiveCancel:
 class ClientService:
     def __init__(
         self, transport: Transport, server_peer: Peer, username: str, *,
-        file_receiver: FileReceiver | None = None,
+        file_receiver: FileReceiver | None = None, tcp_peer: Peer | None = None,
     ) -> None:
+        self.tcp_peer = tcp_peer
+        self.session_id = None
+        self._session_tasks = []
+        self._login_attempted = False
         self.transport = transport
         self.server_peer = server_peer
         self.username = username
@@ -46,13 +51,64 @@ class ClientService:
         self._sent_file_count = 0
 
     async def login(self, password: str) -> None:
-        # TODO[K1]: handshake TCP + auth; AUTH_OK trả session_id, không trả khóa.
-        # Đăng ký peer/session rồi BIND/BIND_OK theo docs/02_API.md.
-        # Cần truyền cấu hình TCP riêng; server_peer là endpoint UDP.
-        # Nhận cấu hình phiên, đăng ký peer/session; BIND trước dữ liệu nghiệp vụ.
-        raise NotImplementedError("TODO[K1]: ClientService.login")
+        if self.tcp_peer is None or self._login_attempted or self._receive_started:
+            raise RuntimeError("Cần client mới với tcp_peer để đăng nhập")
+        self._login_attempted = True
+        try:
+            await self.transport.start()
+            self.server_peer, session = await authenticate(self.tcp_peer, self.username, password)
+            self.transport.register_peer(self.server_peer, session)
+            await bind_session(self.transport, self.server_peer, self.username, session)
+            self.session_id = session
+            self._session_tasks = [asyncio.create_task(self.receive_events()),
+                                   asyncio.create_task(self._heartbeat())]
+            for task in self._session_tasks:
+                task.add_done_callback(self._session_task_done)
+            await asyncio.sleep(0)
+        except BaseException:
+            try:
+                await self.transport.close()
+            except Exception:
+                pass
+            raise
+
+    def _session_task_done(self, task):
+        if not task.cancelled():
+            task.exception()  # Lỗi được phản ánh bằng connected=False, không log bí mật.
+        self.session_id = None
+        for other in self._session_tasks:
+            if other is not task and not other.done():
+                other.cancel()
+
+    async def _heartbeat(self):
+        while True:
+            await asyncio.sleep(3)
+            await asyncio.wait_for(self.transport.send(self.server_peer, Packet(
+                kind=MessageType.HEARTBEAT, sender=self.username, recipient="server",
+                stream_id="control", session_id=self.session_id)), timeout=3)
+
+    async def logout(self):
+        if self._file_sender is not None:
+            self._file_sender.request_cancel()
+            await self._file_sender.finished.wait()
+        try:
+            if self.session_id is not None:
+                await asyncio.wait_for(self.transport.send(self.server_peer, Packet(
+                    kind=MessageType.LOGOUT, sender=self.username, recipient="server",
+                    stream_id="control", session_id=self.session_id)), timeout=2)
+        finally:
+            self.session_id = None
+            for task in self._session_tasks:
+                task.cancel()
+            await asyncio.gather(*self._session_tasks, return_exceptions=True)
+            await self.transport.close()
+
+    def _check_session(self):
+        if self.tcp_peer is not None and self.session_id is None:
+            raise ConnectionError("Client chưa đăng nhập/BIND hoặc phiên đã dừng")
 
     async def send_chat(self, recipient: str, text: str) -> None:
+        self._check_session()
         recipient = recipient.strip()
 
         if not recipient or len(recipient) > 32:
@@ -82,6 +138,7 @@ class ClientService:
 
     async def send_file(self, recipient: str, path: Path) -> None:
         """Chờ tới COMPLETE đúng size/hash; lỗi/timeout/hủy được trả về caller."""
+        self._check_session()
         if type(recipient) is not str or re.fullmatch(r"[A-Za-z0-9_-]{1,32}", recipient) is None:
             raise ValueError("File phải gửi riêng tới một username hợp lệ")
         if not self._receiving:

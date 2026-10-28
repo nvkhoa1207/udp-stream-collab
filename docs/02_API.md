@@ -324,3 +324,16 @@ Client dispatcher/timer chưa ghép; các API local này chưa chứng minh file
   cầu; nếu đã bắt đầu thì worker tiếp tục cleanup/báo hủy.
 - Demo: `python -m scripts.demo_client_file_control --receiver-cancel`.
   Đây là API core qua mock; nút trên HTTP/UI vẫn chưa triển khai.
+
+## Client login/lifecycle
+
+ClientService nhận thêm tcp_peer=(host, port). login(password) là một lần trên
+mỗi instance: start transport, TCP HELLO/AUTH (deadline tổng 8s), lấy IP thực từ
+TCP peer và UDP port từ AUTH_OK, register_peer, BIND cùng transport (tối đa 9
+lần, cùng Packet/ID). Sau BIND_OK mới cho chat/file, chạy receive và heartbeat
+3s. logout dừng file/tasks và đóng transport, gửi LOGOUT tối đa 2s. Lỗi một task
+phiên làm mất trạng thái connected và hủy task còn lại. Caller phải logout để
+thu hồi transport sau lỗi. Không log password/session; phiên mới dùng instance mới.
+Transport phải hỗ trợ bootstrap BIND send không đợi DATA ACK; BIND_OK giao cho
+consumer bootstrap trước khi đưa dữ liệu nghiệp vụ vào vòng nhận. Transport
+thật hiện vẫn stub của Hải; API này đã test với fake, chưa nghiệm thu mạng thật.
