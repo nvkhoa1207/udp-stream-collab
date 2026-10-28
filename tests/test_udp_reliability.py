@@ -8,8 +8,10 @@ from transport.reliable_udp import ReliableUdpTransport
 
 class ReliabilityTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.a = ReliableUdpTransport(('127.0.0.1', 0), retry_seconds=0.02, max_retries=2)
-        self.b = ReliableUdpTransport(('127.0.0.1', 0), retry_seconds=0.02, max_retries=2)
+        self.a = ReliableUdpTransport(('127.0.0.1', 0), retry_seconds=0.02, max_retries=2,
+                                      probe_seconds=0.02, stall_seconds=0.15)
+        self.b = ReliableUdpTransport(('127.0.0.1', 0), retry_seconds=0.02, max_retries=2,
+                                      probe_seconds=0.02, stall_seconds=0.15)
         await self.a.start()
         await self.b.start()
         self.a.register_peer(self.b.local_address, 'a' * 32)
@@ -48,7 +50,8 @@ class ReliabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.a._pending)
 
     async def test_wrong_ack_and_retry_limit_fail_stream(self):
-        self.b._write = lambda *args: None
+        write = self.b._write
+        self.b._write = lambda peer, packet: None if packet.kind == M.ACK else write(peer, packet)
         send = asyncio.create_task(self.a.send(self.b.local_address, self.packet))
         await asyncio.sleep(0.01)
         self.a._received(self.b.local_address, Packet(kind=M.ACK, sender='khoa', recipient='hai',

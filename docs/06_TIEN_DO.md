@@ -268,3 +268,7 @@ UDP endpoint hữu hạn, bootstrap BIND/BIND_OK, kiểm tra session/sender/IP/e
 ## Hải — giai đoạn 3
 Selective ACK theo stream/chiều, retry hữu hạn backoff tối đa 4s, dedup và fail stream khi mất sequence. Không ACK dữ liệu session policy từ chối. Pending sends được đánh thức khi remove/close. Regression 176 tests: 175 pass, 1 skip; fault injection quanh UDP loopback thật, không phải netem.
 
+
+## Hải — giai đoạn 4
+Selective Repeat pipeline, reorder 8 packet/stream; credit tuyệt đối, initial 0, probe có giới hạn nhịp và stall deadline. Control có buffer dành trước; ACTIVE/DRAINING/CLOSED, tombstone đến hết phiên, quota lịch sử 4096 tính cả stream đang hoạt động. Cache payload kết quả file vẫn do FileOfferReceiver giữ 120s. Regression 180 tests: 179 pass, 1 skip. Đã thử 140 stream UDP nối tiếp, quota/zero-window/reorder/mất update; kết nối tín hiệu kết thúc file vào application ở giai đoạn relay.
+

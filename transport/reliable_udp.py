@@ -6,6 +6,7 @@ from ipaddress import ip_address
 
 from common.codec import decode_packet, encode_packet
 from common.config import MAX_DATAGRAM_BYTES
+from common.config import RECEIVE_WINDOW_PACKETS, MAX_RECEIVE_STREAMS
 from common.models import MessageType as M, Packet, ReceivedPacket
 
 
@@ -20,6 +21,9 @@ class _ReceiveStream:
 class _SendStream:
     sequence: int = 0
     error: Exception | None = None
+    limit: int = 0
+    changed: asyncio.Event = field(default_factory=asyncio.Event)
+    probe_at: float = 0.0
 
 
 class _Protocol(asyncio.DatagramProtocol):
@@ -43,7 +47,8 @@ class _Protocol(asyncio.DatagramProtocol):
 
 class ReliableUdpTransport:
     def __init__(self, local_address, *, bootstrap=None, authorize=None,
-                 retry_seconds=0.5, max_retries=8):
+                 retry_seconds=0.5, max_retries=8, probe_seconds=1.0,
+                 stall_seconds=10.0, max_streams=MAX_RECEIVE_STREAMS):
         self.local_address = local_address
         self.bootstrap = bootstrap
         self.authorize = authorize
@@ -59,6 +64,11 @@ class ReliableUdpTransport:
         self._tx = {}
         self._rx = {}
         self._pending = {}
+        self._tombstones = {}
+        self._draining = {}
+        self.probe_seconds = probe_seconds
+        self.stall_seconds = stall_seconds
+        self.max_streams = max_streams
 
     def register_peer(self, peer, session_id):
         host, port = peer
@@ -70,6 +80,10 @@ class ReliableUdpTransport:
             raise ValueError('Endpoint already registered')
         if peer not in self._peers and len(self._peers) >= 100:
             raise ValueError('Peer quota reached')
+        if peer not in self._peers:
+            if len(self._rx) >= self.max_streams:
+                raise ValueError('No reserved control buffer available')
+            self._rx[(peer, 'control')] = _ReceiveStream()
         self._peers[peer] = session_id
 
     def remove_peer(self, peer):
@@ -81,13 +95,46 @@ class ReliableUdpTransport:
         for key in list(self._rx):
             if key[0] == peer:
                 del self._rx[key]
+        for key in list(self._tombstones):
+            if key[0] == peer:
+                del self._tombstones[key]
+        for key in list(self._draining):
+            if key[0] == peer:
+                del self._draining[key]
 
     def _fail_stream(self, key, error):
         if key in self._tx:
             self._tx[key].error = error
+            self._tx[key].changed.set()
         for pending_key, future in list(self._pending.items()):
             if pending_key[:2] == key and not future.done():
                 future.set_result(error)
+
+    def finish_stream(self, peer, stream_id, *, success=True):
+        """Close both directions after application completion; keep a small tombstone.
+
+        File result payload caches live in FileOfferReceiver (120 seconds).
+        Late delivered DATA can still be ACKed, never delivered a second time.
+        """
+        if stream_id == 'control' or stream_id.startswith('chat-'):
+            return
+        key = (peer, stream_id)
+        if key in self._tombstones or (key not in self._tx and key not in self._rx):
+            return
+        if success:
+            self._draining[key] = success
+            if any(k[:2] == key for k in self._pending) or (
+                    key in self._rx and self._rx[key].packets):
+                return
+        self._draining.pop(key, None)
+        rx = self._rx.pop(key, None)
+        self._fail_stream(key, ConnectionError('Stream closed'))
+        self._tx.pop(key, None)
+        self._tombstones[key] = (rx.consumed if rx else 0, success)
+
+    def _can_reserve(self, peer, stream_id):
+        history = {k[1] for k in (*self._tombstones, *self._rx, *self._tx) if k[0] == peer}
+        return stream_id in history or len(history) < 4096
 
     def _control(self, peer, packet, kind, **kwargs):
         self._write(peer, Packet(kind=kind, sender=packet.recipient if packet.recipient != '*' else 'server',
@@ -124,23 +171,43 @@ class ReliableUdpTransport:
         if packet.kind == M.ACK:
             future = self._pending.get((*key, packet.ack))
             if future is not None and not future.done():
+                state = self._tx[key]
+                state.limit = max(state.limit, packet.recv_limit)
+                state.changed.set()
                 future.set_result(None)
             return
-        if packet.kind in (M.WINDOW_UPDATE, M.WINDOW_PROBE):
+        if packet.kind == M.WINDOW_UPDATE:
+            state = self._tx.get(key)
+            if state is not None and packet.recv_limit > state.limit:
+                state.limit = packet.recv_limit
+                state.changed.set()
+            return
+        if key in self._tombstones:
+            consumed, _ = self._tombstones[key]
+            if packet.seq and packet.seq <= consumed:
+                self._control(peer, packet, M.ACK, ack=packet.seq, recv_limit=consumed)
+            elif packet.kind == M.WINDOW_PROBE:
+                self._control(peer, packet, M.WINDOW_UPDATE, recv_limit=0)
             return
         state = self._rx.get(key)
-        if state is None:
-            if len(self._rx) >= 128:
-                return
-            state = self._rx[key] = _ReceiveStream()
-        if packet.seq <= state.consumed or packet.seq in state.packets:
-            self._control(peer, packet, M.ACK, ack=packet.seq, recv_limit=state.consumed + 8)
+        if packet.kind == M.WINDOW_PROBE:
+            if state is None and len(self._rx) < self.max_streams and self._can_reserve(*key):
+                state = self._rx[key] = _ReceiveStream()
+            self._control(peer, packet, M.WINDOW_UPDATE,
+                recv_limit=state.consumed + RECEIVE_WINDOW_PACKETS if state else 0)
             return
-        if packet.seq > state.consumed + 8:
+        if state is None:
+            return
+        if packet.seq <= state.consumed or packet.seq in state.packets:
+            self._control(peer, packet, M.ACK, ack=packet.seq, recv_limit=state.consumed + RECEIVE_WINDOW_PACKETS)
+            return
+        if key in self._draining:
+            return
+        if packet.seq > state.consumed + RECEIVE_WINDOW_PACKETS:
             return
         state.packets[packet.seq] = packet
         self._queue_ready(key, state)
-        self._control(peer, packet, M.ACK, ack=packet.seq, recv_limit=state.consumed + 8)
+        self._control(peer, packet, M.ACK, ack=packet.seq, recv_limit=state.consumed + RECEIVE_WINDOW_PACKETS)
 
     def _queue_ready(self, key, state):
         while state.queued + 1 in state.packets and not self._incoming.full():
@@ -159,6 +226,12 @@ class ReliableUdpTransport:
         if packet.kind in (M.ACK, M.WINDOW_PROBE, M.WINDOW_UPDATE):
             raise ValueError('Transport owns ACK/window packets')
         key = (peer, packet.stream_id)
+        if key in self._tombstones:
+            raise ConnectionError('Stream already closed')
+        if key in self._draining:
+            raise ConnectionError('Stream draining')
+        if not self._can_reserve(*key):
+            raise ValueError('Session stream history quota reached; reconnect')
         if key not in self._tx and len(self._tx) >= 512:
             raise ValueError('Send stream quota reached')
         state = self._tx.setdefault(key, _SendStream())
@@ -174,6 +247,23 @@ class ReliableUdpTransport:
         future = asyncio.get_running_loop().create_future()
         self._pending[pending_key] = future
         try:
+            loop = asyncio.get_running_loop()
+            progress_at, old_limit = loop.time(), state.limit
+            while packet.seq > state.limit:
+                if state.error is not None:
+                    raise state.error
+                if state.limit > old_limit:
+                    progress_at, old_limit = loop.time(), state.limit
+                if loop.time() - progress_at >= self.stall_seconds:
+                    raise TimeoutError('Receive window stalled')
+                state.changed.clear()
+                if loop.time() >= state.probe_at:
+                    state.probe_at = loop.time() + self.probe_seconds
+                    self._write(peer, replace(packet, kind=M.WINDOW_PROBE, seq=0, payload=b'', chunk_index=None))
+                try:
+                    await asyncio.wait_for(state.changed.wait(), max(0.001, state.probe_at - loop.time()))
+                except TimeoutError:
+                    pass
             for attempt in range(self.max_retries + 1):
                 self._write(peer, packet)
                 try:
@@ -187,22 +277,34 @@ class ReliableUdpTransport:
                         raise TimeoutError('UDP retry limit reached')
         except BaseException:
             self._fail_stream(key, ConnectionError('Stream send failed or cancelled'))
+            self.finish_stream(peer, packet.stream_id, success=False)
             raise
         finally:
             self._pending.pop(pending_key, None)
+            if key in self._draining:
+                self.finish_stream(*key, success=self._draining[key])
 
     async def receive(self):
-        received = await self._incoming.get()
-        if received is None:
-            self._incoming.put_nowait(None)
-            raise ConnectionError('Transport closed')
-        key = (received.peer, received.packet.stream_id)
-        state = self._rx.get(key)
-        if received.packet.seq and state is not None:
-            state.consumed = received.packet.seq
-            state.packets.pop(state.consumed, None)
-            self._queue_ready(key, state)
-        return received
+        while True:
+            received = await self._incoming.get()
+            if received is None:
+                self._incoming.put_nowait(None)
+                raise ConnectionError('Transport closed')
+            key = (received.peer, received.packet.stream_id)
+            if self._peers.get(received.peer) != received.packet.session_id:
+                continue
+            state = self._rx.get(key)
+            if received.packet.seq:
+                if state is None:
+                    continue
+                state.consumed = received.packet.seq
+                state.packets.pop(state.consumed, None)
+                self._control(received.peer, received.packet, M.WINDOW_UPDATE,
+                              recv_limit=state.consumed + RECEIVE_WINDOW_PACKETS)
+                self._queue_ready(key, state)
+                if key in self._draining:
+                    self.finish_stream(*key, success=self._draining[key])
+            return received
 
     async def close(self):
         if self._closed:
@@ -217,6 +319,8 @@ class ReliableUdpTransport:
         self._peers.clear()
         self._rx.clear()
         self._tx.clear()
+        self._tombstones.clear()
+        self._draining.clear()
         while not self._incoming.empty():
             self._incoming.get_nowait()
         self._incoming.put_nowait(None)
