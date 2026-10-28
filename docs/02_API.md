@@ -162,7 +162,7 @@ dấu flow control hoàn thành chỉ vì constructor Packet nhận được fie
   muộn, không xóa file đã hoàn tất. Có thể trả ERROR FILE_CANCELLED hoặc kết quả
   COMPLETE đã cache. Hủy và hoàn tất có thể chạy đua; cancelled ở sender không
   có nghĩa file hoàn chỉnh trên máy nhận đã bị xóa.
-- Chưa có API nút hủy lượt nhận ở local. Snapshot nhận mô tả ở phần dưới.
+- Hủy lượt nhận ở local dùng cancel_receive_file, mô tả ở phần dưới.
   Demo `python -m scripts.demo_client_file_control` chứng minh tiến độ/hủy qua mock.
 
 ### Tiến độ và lỗi phía nhận
@@ -184,8 +184,9 @@ dấu flow control hoàn thành chỉ vì constructor Packet nhận được fie
   được thay đổi snapshot của lượt đang chạy.
 - Hết hạn không có chunk mới trong 45s (mặc định) → expired/FILE_EXPIRED sau khi
   dọn thành công. Đồng bộ cả expire định kỳ và expire bên trong begin file mới.
-  Chunk trùng không kéo deadline. Đây là thông báo local để UI polling; chưa có
-  ERROR chủ động gửi về sender khi timer chạy, sender vẫn dùng timeout của nó.
+  Chunk trùng không kéo deadline. Sau dọn thành công, worker gửi ERROR FILE_EXPIRED
+  qua control với related_message_id của META gốc. Sender nhận đúng ID sẽ dừng
+  lượt gửi; vẫn có deadline riêng nếu thông báo mất hoặc không tới.
 - Hủy từ xa → cancelled/FILE_CANCELLED; đóng client khi còn nhận dở →
   cancelled/CLIENT_CLOSED. Lỗi unlink → failed/FILE_STORAGE_ERROR và
   cleanup_pending=true; giữ snapshot/quota để retry. Sau expire/close thành công,
@@ -240,8 +241,13 @@ thêm mã hóa, MSG_DELIVERED hay module mới để đáp ứng một bản đ�
   Không gọi trực tiếp FileReceiver từ worker khác khi nó thuộc ClientService.
 - Worker quét expire trước mỗi lượt xử lý và sau tối đa 1 giây chờ queue rỗng;
   lúc đang xử lý/gửi phản hồi, lần quét kế tiếp chờ thao tác đó kết thúc. Deadline
-  gửi ACCEPT/COMPLETE/ERROR là 10 giây. Timer cập nhật snapshot hết hạn local;
-  chưa gửi thông báo timeout chủ động qua mạng về người gửi.
+  gửi ACCEPT/COMPLETE/ERROR là 10 giây. Timer cập nhật snapshot hết hạn local
+  và chủ động báo ERROR về sender, kể cả lượt được dọn khi begin file mới.
+  take_notifications() lấy thông báo một lần trên worker; retry thuộc transport.
+  Hàng đợi được chặn bởi quota 4096 ID/phiên; worker xả sau expire/handle. Kết
+  quả lỗi cache 120s, không gia hạn vì END lặp; dấu ID giữ tới hết phiên. Nếu
+  gửi thông báo timeout lỗi/quá hạn, vòng nhận fail và cleanup như lỗi gửi phản
+  hồi khác; nếu bản thân cleanup lỗi thì không khẳng định đã dọn/hết quota.
 - `receive_events()` chạy một lần mỗi instance/phiên. Hủy và await task này
   sẽ dừng worker, chờ I/O đang chạy trước khi close FileReceiver, bỏ gói file còn
   trong queue. Caller đóng transport sau đó. Lỗi gửi phản hồi/cleanup làm vòng
@@ -296,3 +302,51 @@ phục hồi transfer hoặc tự xóa file mồ côi của phiên/process trư�
 Quota FileReceiver và quota stream độc lập. Hải triển khai thu hồi buffer khi
 stream CLOSED, giữ dấu chống trùng nhỏ đến hết phiên theo protocol mục 6.1.
 Client dispatcher/timer chưa ghép; các API local này chưa chứng minh file mạng.
+
+### Người nhận chủ động hủy file
+
+- `await cancel_receive_file(transfer_id) -> bool` đưa yêu cầu vào cùng queue
+  8 phần tử của worker nhận, không gọi FileReceiver trực tiếp từ UI. Worker
+  xử lý tuần tự sau các việc đã xếp hàng, không ngắt ngang thao tác ghi/hash.
+- ID phải là 32 hex thường; cần vòng nhận và worker đang chạy. Queue đầy báo
+  RuntimeError để caller thử lại, không tạo hàng đợi yêu cầu hủy vô hạn.
+- False nếu không còn lượt nhận đang hoạt động (gồm chưa có META hoặc đã hoàn
+  tất). True nếu worker đã xử lý yêu cầu; đọc snapshot để biết cleanup/gửi hủy.
+  File đã hoàn tất giữ nguyên, không bị xóa khi người dùng bấm hủy muộn.
+- Worker dọn .part và gửi FILE_CANCEL qua control tới sender gốc, deadline 3s.
+  Snapshot receive có cancel_delivery pending/sent_to_server/failed. Gửi thất
+  bại không dừng các lượt nhận khác; sent_to_server không xác nhận đầu xa đã
+  xử lý. Lỗi unlink vẫn báo sender dừng, giữ failed/cleanup_pending và quota
+  để expire/close retry. Cache FILE_CANCELLED ngăn chunk muộn tiếp tục ghi.
+- Poll giữ snapshot khi cancel_delivery=pending. Client dừng sẽ giải quyết
+  các yêu cầu đang chờ bằng ConnectionError, dọn tài nguyên và kết thúc trạng
+  thái pending. Caller hủy task yêu cầu trước khi worker bắt đầu thì bỏ yêu
+  cầu; nếu đã bắt đầu thì worker tiếp tục cleanup/báo hủy.
+- Demo: `python -m scripts.demo_client_file_control --receiver-cancel`.
+  Đây là API core qua mock; nút trên HTTP/UI vẫn chưa triển khai.
+
+## Client login/lifecycle
+
+ClientService nhận thêm tcp_peer=(host, port). login(password) là một lần trên
+mỗi instance: start transport, TCP HELLO/AUTH (deadline tổng 8s), lấy IP thực từ
+TCP peer và UDP port từ AUTH_OK, register_peer, BIND cùng transport (tối đa 9
+lần, cùng Packet/ID). Sau BIND_OK mới cho chat/file, chạy receive và heartbeat
+3s. logout dừng file/tasks và đóng transport, gửi LOGOUT tối đa 2s. Lỗi một task
+phiên làm mất trạng thái connected và hủy task còn lại. Caller phải logout để
+thu hồi transport sau lỗi. Không log password/session; phiên mới dùng instance mới.
+Transport phải hỗ trợ bootstrap BIND send không đợi DATA ACK; BIND_OK giao cho
+consumer bootstrap trước khi đưa dữ liệu nghiệp vụ vào vòng nhận. Transport
+thật hiện vẫn stub của Hải; API này đã test với fake, chưa nghiệm thu mạng thật.
+
+## HTTP bridge đã triển khai
+
+ui.bridge dùng HTTPServer tuần tự trên 127.0.0.1, socket timeout 10s; core chạy
+trên event loop riêng. Host phải đúng 127.0.0.1:port; POST cần Origin cùng origin
+và X-Client-Token cấp trong HTML, API GET cũng cần token. Không log request/body.
+POST /api/login {host,port,username,password}, /messages {recipient,text},
+/logout {}, /cancel {direction,transfer_id}. POST /api/files?name=...&recipient=...
+nhận body nhị phân Content-Length tối đa 16 MiB, không cho traversal, dọn upload
+khi job xong/hủy. Chỉ 4 job; event ring 512, GET /api/events?after=N trả events,
+cursor, reset, connected. reset báo cursor cũ bị bỏ, UI phải hiển thị mất lịch sử.
+File snapshot lấy cùng ring; sender nhận lỗi job qua event error. Login thật
+hiện trả 503 khi gọi transport stub; không giả vờ kết nối thành công.

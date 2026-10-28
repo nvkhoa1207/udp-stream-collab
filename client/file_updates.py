@@ -41,7 +41,8 @@ class FileUpdates:
                     continue
                 updates.append(dict(record))
                 terminal = record["status"] in ("completed", "cancelled", "failed", "expired")
-                pending = record["cleanup_pending"] or record.get("confirmation_delivery") == "pending"
+                pending = (record["cleanup_pending"] or record.get("confirmation_delivery") == "pending"
+                           or record.get("cancel_delivery") == "pending")
                 if terminal and not pending:
                     del self.records[key]
             self.dirty.clear()

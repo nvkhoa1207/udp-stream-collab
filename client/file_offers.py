@@ -35,12 +35,16 @@ class FileOfferReceiver:
         self._watching: set[str] = set()
         self._cleanup_pending: set[str] = set()
         self._confirming: set[str] = set()
+        self._local_cancelling: set[str] = set()
+        self._offers: dict[str, Packet] = {}
+        self._notifications: dict[str, Packet] = {}
 
     def _update(self, transfer_id, **changes):
         if self.updates is not None:
             self.updates.update(transfer_id, direction="receive", **changes)
 
     def _settle(self, transfer_id, status, **changes):
+        self._offers.pop(transfer_id, None)
         pending = self.receiver is not None and transfer_id in self.receiver.transfers
         self._update(transfer_id, status=status, cleanup_pending=pending, **changes)
         if pending:
@@ -60,13 +64,24 @@ class FileOfferReceiver:
                     self._watching.discard(transfer_id)
                     self._cleanup_pending.discard(transfer_id)
             elif transfer is None:
-                self._settle(transfer_id, "expired", code="FILE_EXPIRED", message="Lượt nhận đã hết hạn")
+                offer = self._offers.get(transfer_id)
+                if offer is not None:
+                    reply = self._error(offer, "FILE_EXPIRED", "Lượt nhận đã hết hạn")
+                    self._notifications[transfer_id] = self._remember_result(offer, reply)
+                else:
+                    self._settle(transfer_id, "expired", code="FILE_EXPIRED", message="Lượt nhận đã hết hạn")
             elif transfer["failed"]:
                 self._settle(transfer_id, "failed", code="FILE_STORAGE_ERROR", message="Chưa dọn được file tạm")
 
     def _reject(self, packet, code, message):
         self._settle(packet.stream_id, "failed", code=code, message=message)
         return self._error(packet, code, message)
+
+    def take_notifications(self) -> list[Packet]:
+        """Worker lấy thông báo một lần; retry truyền gói thuộc transport."""
+        replies = list(self._notifications.values())
+        self._notifications.clear()
+        return replies
 
     def _valid_address(self, packet: Packet) -> bool:
         return (packet.recipient == self.username
@@ -127,6 +142,7 @@ class FileOfferReceiver:
             self._sync_expired()
 
         self.owners[transfer_id] = packet.sender
+        self._offers[transfer_id] = packet
         self._watching.add(transfer_id)
         saved = self.receiver.transfers[transfer_id]["metadata"]
         self._update(transfer_id, status="receiving", total_bytes=saved["size"], name=saved["name"])
@@ -147,6 +163,7 @@ class FileOfferReceiver:
                     del self.owners[transfer_id]
 
     def _remember_result(self, packet: Packet, reply: Packet) -> Packet:
+        self._offers.pop(packet.stream_id, None)
         self.owners.pop(packet.stream_id, None)
         self.results[packet.stream_id] = (
             packet.sender, reply, self._clock() + FILE_RESULT_CACHE_SECONDS,
@@ -266,12 +283,34 @@ class FileOfferReceiver:
             self._sync_expired()
             self._prune()
 
+    def cancel_local(self, transfer_id: str) -> Packet | None:
+        """Chỉ gọi trong worker; không hủy file đã kết thúc hoặc chưa được nhận."""
+        offer = self._offers.get(transfer_id)
+        if offer is None or transfer_id not in self.receiver.transfers:
+            return None
+        self._update(transfer_id, cancel_delivery="pending")
+        self._local_cancelling.add(transfer_id)
+        self._fail(offer, "FILE_CANCELLED", "Người nhận đã hủy lượt truyền")
+        return Packet(
+            kind=MessageType.FILE_CANCEL, sender=self.username, recipient=offer.sender,
+            stream_id="control", payload=json.dumps({
+                "transfer_id": transfer_id, "reason": "Receiver cancelled the transfer",
+            }).encode(),
+        )
+
+    def note_local_cancel(self, transfer_id: str, delivery: str):
+        self._update(transfer_id, cancel_delivery=delivery)
+        self._local_cancelling.discard(transfer_id)
+
     def close(self) -> None:
         try:
             if self.receiver is not None:
                 self.receiver.close()
         finally:
             # finish() có thể xong trong thread ngay khi worker bị hủy, trước send COMPLETE.
+            for transfer_id in self._local_cancelling:
+                self._update(transfer_id, cancel_delivery="failed")
+            self._local_cancelling.clear()
             for transfer_id in self._confirming:
                 self._update(transfer_id, confirmation_delivery="failed")
             self._confirming.clear()
@@ -286,3 +325,5 @@ class FileOfferReceiver:
                     self._settle(transfer_id, "cancelled", code="CLIENT_CLOSED", message="Client đã dừng nhận file")
             self.owners.clear()
             self.results.clear()
+            self._offers.clear()
+            self._notifications.clear()

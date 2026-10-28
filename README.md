@@ -12,7 +12,7 @@ truyền file tin cậy qua UDP trong mạng LAN.
 kiểm thử được và giải thích được code.
 
 > **Dự án đang phát triển.** Đã có model, mock, chia file và một số chức năng
-> client/file local. Server TCP/UDP, transport tin cậy và HTTP bridge còn TODO.
+> client/file local. Server TCP/UDP và transport tin cậy còn TODO; HTTP bridge/client đã có, chưa ghép mạng thật.
 > Hiện chạy được các demo bên dưới; chưa có ứng dụng chat/file hoàn chỉnh qua
 > mạng thật. Phần “thiết kế” không đồng nghĩa với phần “đã triển khai”.
 
@@ -280,13 +280,14 @@ hạn; không tuyên bố chống nghe lén hay giả mạo chủ động. Phầ
 | Packet, MessageType, Transport, mock | Có; model thêm recv_limit và WINDOW_UPDATE/PROBE |
 | Chia file, build_metadata, FileReceiver | Có xử lý local: metadata/hash/quota, ghép/dedup, cancel/expire/close |
 | ClientService.send_chat và event MSG/USER_LIST | Có, chạy qua mock; ERROR của chat chưa ghép |
-| ClientService nhận META/CHUNK/END/CANCEL | Có worker ghi/kiểm tra/dọn file, phản hồi/cache; snapshot byte đã ghi, hoàn tất/lỗi/hủy/hết hạn qua poll_file_updates |
+| ClientService nhận META/CHUNK/END/CANCEL | Có worker ghi/kiểm tra/dọn file, phản hồi/cache; snapshot byte đã ghi, hoàn tất/lỗi/hủy/hết hạn; báo ERROR chủ động khi expire |
 | ClientService.send_file | Có luồng gửi, ERROR/CANCEL, tối đa 8 chunk đồng thời; snapshot tiến độ/trạng thái qua poll_file_updates; đã thử với bên nhận qua mock |
 | Demo mock/chat/online/file local, demo_client_file_offer/receive/send | Có trong cây nguồn |
 | register_peer(peer, session_id) | Chữ ký đã bỏ khóa; xử lý đăng ký vẫn TODO |
-| Login, codec, server/auth/session/router | TODO |
+| Login client | Có TCP HELLO/AUTH, BIND, heartbeat/logout; chờ transport/server thật để ghép |
+| Codec, server/auth/session/router | TODO của Hải |
 | Reliable UDP, flow control, CUBIC giản lược | Hợp đồng đã chốt; xử lý mạng vẫn TODO |
-| UI và bridge | HTML/JS fixture, nút disabled; bridge TODO |
+| UI và bridge | HTTP localhost + polling, form/chat/file/progress/cancel; login thật báo 503 do transport stub |
 | PayloadCipher | Stub tùy chọn ngoài phạm vi bản đầu |
 
 Đây là mô tả source đi cùng README, không phải tuyên bố GitHub main đã được
@@ -365,6 +366,7 @@ python -m scripts.demo_client_file_offer
 python -m scripts.demo_client_file_receive
 python -m scripts.demo_client_file_send
 python -m scripts.demo_client_file_control
+python -m scripts.demo_client_file_control --receiver-cancel
 python -m scripts.demo_client_receive_status
 python -m scripts.demo_file_receiver
 ```
@@ -386,18 +388,18 @@ socket TCP/UDP**, không kiểm tra mất gói hoặc chứng minh truyền qua 
 
 ### Entrypoint server/client
 
-Hiện chỉ xem được tham số:
+Chạy HTTP client bằng Python 3.11 trở lên:
 
 ```bash
-python -m server.main --help
-python -m client.main --help
+python -m client.main --http-port 8000 --received-dir data/received
 ```
 
-Chạy server hoặc client thật hiện kết thúc với exit code 2 và thông báo chưa
-triển khai. Chưa có tài khoản đăng nhập thật, HTTP bridge đang nghe hoặc lệnh
-chạy ứng dụng hoàn chỉnh để hướng dẫn. Khi ghép xong, mục này phải được thay
-bằng lệnh chạy thật, cách tạo tài khoản demo, địa chỉ UI và cách thử hai máy LAN
-đã được kiểm chứng.
+Mở http://127.0.0.1:8000, nhập server/TCP port/username/password trên form.
+HTTP UI chạy thật; không có dữ liệu fixture. Hiện login hiển thị lỗi 503 do
+ReliableUdpTransport của Hải còn stub, chưa có server/tài khoản thật. Không
+coi việc mở được UI là đã chạy chat/file qua UDP. Ctrl+C đóng bridge và core.
+Một client khác trên cùng máy dùng --http-port 8001 và thư mục nhận riêng.
+Server vẫn chỉ có --help; xem báo cáo phần Khoa trong reports/KHOA_REPORT.md.
 
 ### Bố trí demo hai máy sau khi ghép mạng
 
@@ -408,8 +410,8 @@ bằng lệnh chạy thật, cách tạo tài khoản demo, địa chỉ UI và 
 | Client cũng trỏ IP LAN máy Khoa | Browser mở HTTP localhost của máy Hải |
 
 Hai máy là đủ. Bridge của cả hai vẫn chỉ `127.0.0.1`; không dùng `0.0.0.0` cho
-bridge. Một máy thử nhiều client cần cổng HTTP riêng. Hiện entrypoint còn TODO,
-đây là sơ đồ triển khai; bổ sung lệnh và địa chỉ UI đã kiểm chứng sau khi ghép.
+bridge. Một máy thử nhiều client cần cổng HTTP riêng. Phần server/UDP trong sơ
+đồ này vẫn chờ Hải triển khai và kiểm thử LAN.
 
 ## 9. Kiểm thử và nghiệm thu
 
@@ -460,8 +462,8 @@ reliability/flow/congestion control chỉ là bản trung gian, chưa phải b�
 |---|---|
 | `No module named scripts...` | Chạy ở thư mục gốc bằng `python -m ...`; kiểm tra hai demo local đã được đồng bộ chưa |
 | `NotImplementedError` | Đã gọi phần TODO; xem tiến độ, không coi là lỗi cài thư viện |
-| Server/client thoát ngay | Entrypoint chưa triển khai; `--help` chỉ hiển thị tham số |
-| UI có dữ liệu mẫu, nút disabled | Fixture chưa có bridge và chưa nối core |
+| Server thoát ngay | Server chưa triển khai; client HTTP chạy bằng lệnh ở trên |
+| UI chưa kết nối, nút chat/file disabled | Đăng nhập/BIND chưa thành công; xem lỗi hiển thị, transport hiện còn stub |
 | File thử thay đổi sau demo | Hai demo file có tạo/ghi đè demo_original.bin, như ghi ở mục 8 |
 
 Không cần mở firewall hoặc đổi thiết lập mạng để chạy demo bộ nhớ. Hướng dẫn

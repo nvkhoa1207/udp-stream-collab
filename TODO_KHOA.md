@@ -16,16 +16,21 @@ Mở `scripts/demo_mock.py` trước: đây là cách làm song song mà chưa c
 | K7 | 4 | Kiểm thử client/file/mất gói cùng A | Có kết quả thật, hash, log, ảnh; UI không đứng khi file đang gửi |
 | K8 | 5 | Báo cáo luồng chat/file, UI, kiểm thử + README client | Người khác chạy được client; mô tả đúng cái đã làm |
 
-## Trạng thái local
+## Trạng thái sau các commit ngày 28/10/2026
 
-Đã có send_chat, event MSG/USER_LIST, chia/ghép file có validate/quota/cleanup.
-ClientService đã nhận META/CHUNK/END và gửi file tự động qua send_file: chờ ACCEPT,
-gửi nhóm tối đa 8 chunk, chờ COMPLETE đúng size/hash, nhận ERROR đúng lượt.
-Hai phía đã chạy cùng nhau qua mock. Đã có snapshot tiến độ hai chiều và hủy bằng
-FILE_CANCEL; CANCEL sớm không cho META tạo file muộn, CANCEL muộn giữ file đã xong.
-Phía nhận có completed/failed/cancelled/expired và thông tin còn phải dọn file.
-K4 còn kiểm thử mạng thật; K1/K6 chưa tích hợp, nút hủy nhận local chưa có.
-Chưa tick nghiệm thu chỉ dựa vào mock. Xem [tiến độ](docs/06_TIEN_DO.md).
+| Mốc | Code của Khoa | Kiểm chứng/việc còn lại |
+|---|---|---|
+| K1 | TCP login, BIND, heartbeat/logout, HTTP entrypoint | TCP loopback test đạt; BIND/lifecycle test fake, chờ transport Hải |
+| K2 | Chat, USER_LIST, event và UI | Mock đạt; chờ online/router thật |
+| K3 | Metadata/chunk/reassembly/hash/quota | Unit test và demo local đạt |
+| K4 | Gửi/nhận, progress, CANCEL hai chiều, timeout | Mock đạt; cần UDP đầu-cuối |
+| K5 | Validate file/input, quota/cleanup, HTTP Host/Origin/token | Test local đạt; bảo mật phiên/endpoint thật phụ thuộc Hải |
+| K6 | HTTP localhost + HTML/JS thật, polling/chat/file/cancel | Browser lỗi login stub đúng; chưa nghiệm thu UI với mạng thật |
+| K7 | Test tự động, demo/fault injection, TCP loopback và smoke UI | 119 ca (118 đạt + 1 tùy chọn); ca TCP riêng đạt; LAN/loss/load còn chờ Hải |
+| K8 | README/UI guide, báo cáo phần Khoa và ảnh minh chứng | reports/KHOA_REPORT.md; chưa ghép PDF báo cáo cả nhóm |
+
+Code thuộc client/ui đã có; không coi toàn BTL hoàn tất khi server/transport
+còn stub. Tham chiếu báo cáo và docs/06_TIEN_DO.md để phân biệt mock với mạng thật.
 
 ## Thứ tự bắt đầu
 

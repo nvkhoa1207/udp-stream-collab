@@ -45,6 +45,7 @@ class ServerApp:
         self._server: asyncio.Server | None = None
         self._tasks: set[asyncio.Task] = set()
         self._writers: set[asyncio.StreamWriter] = set()
+        self._maintenance_task = None
 
     @property
     def address(self) -> tuple[str, int]:
@@ -63,6 +64,7 @@ class ServerApp:
             self.host,
             self.tcp_port,
         )
+        self._maintenance_task = asyncio.create_task(self._maintenance())
 
         logger.info(
             "TCP handshake server đang nghe tại %s:%s",
@@ -214,6 +216,10 @@ class ServerApp:
 
 
     async def close(self) -> None:
+        if self._maintenance_task is not None:
+            self._maintenance_task.cancel()
+            await asyncio.gather(self._maintenance_task, return_exceptions=True)
+            self._maintenance_task = None
         if self._server is not None:
             self._server.close()
             await self._server.wait_closed()
@@ -235,6 +241,12 @@ class ServerApp:
 
         self._tasks.clear()
         self._writers.clear()
+        self.sessions.clear()
+
+    async def _maintenance(self) -> None:
+        while True:
+            await asyncio.sleep(0.1)
+            self.sessions.sweep()
 
     async def run(self) -> None:
         await self.start()

@@ -147,3 +147,16 @@ class SessionRegistry:
             if s.peer is not None
             and now - s.last_seen < self._offline_timeout
         )
+
+    def sweep(self) -> list[Session]:
+        """Remove expired sessions and return identities for transport cleanup."""
+        before = dict(self._sessions)
+        self.expire(self._clock())
+        return [s for sid, s in before.items() if sid not in self._sessions]
+
+    def active(self) -> list[Session]:
+        return [s for s in self._sessions.values() if s.peer is not None
+                and self._clock() - s.last_seen < self._offline_timeout]
+
+    def clear(self) -> None:
+        self._sessions.clear()

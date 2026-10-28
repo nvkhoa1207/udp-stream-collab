@@ -246,14 +246,17 @@ ID đã dùng vẫn giữ tới hết phiên. Phía gửi tự động đã có 
 ACCEPT/COMPLETE/ERROR; thử hai ClientService qua relay bộ nhớ thành công.
 CANCEL qua giao thức và snapshot tiến độ hai chiều đã thử qua mock. Phía nhận
 đếm byte chunk duy nhất đã ghi thành công; đủ byte chưa bỏ qua bước kiểm tra
-size/hash khi END. Timer hết hạn có snapshot local, chưa tự gửi ERROR chủ động
-sang sender (sender vẫn có deadline riêng). Sender dừng
+size/hash khi END. Timer dọn thành công lượt hết hạn gửi ERROR FILE_EXPIRED
+qua control, related_message_id là META gốc; cache kết quả 120s để trả lại khi
+END đến muộn. Sender vẫn giữ deadline riêng nếu thông báo không đến. Sender dừng
 và đợi các send/I/O đang chạy trước khi gửi CANCEL trên control; nếu sau META
 có lỗi/timeout hoặc hủy task thì cũng thử báo CANCEL, deadline 3s. ACK chặng
 server của CANCEL không xác nhận bên nhận đã dọn xong. Nếu báo hủy thất bại,
 receiver vẫn có timeout/close; caller nhận lỗi/status, không báo thành công giả.
 
-Receiver kiểm tra chủ lượt truyền trước khi hủy, dọn .part và trả quota. CANCEL
+Receiver kiểm tra chủ lượt truyền trước khi hủy, dọn .part và trả quota.
+Người nhận cũng có thể chủ động hủy qua worker: gửi CANCEL control về sender
+gốc; sender đối chiếu người gửi/transfer_id rồi dừng, không gửi CANCEL đáp lại. CANCEL
 có thể vượt META vì khác stream: giữ ID đã hủy tới hết phiên (trong quota 4096),
 META muộn không được tạo file. Lỗi FILE_CANCELLED được cache 120s như lỗi file
 khác; CANCEL lặp không kéo dài cache. Nếu đã COMPLETE, giữ nguyên file cuối và

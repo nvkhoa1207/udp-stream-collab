@@ -229,6 +229,10 @@ class ClientFileOfferTests(unittest.IsolatedAsyncioTestCase):
             while self.receiver.reserved_bytes:
                 await asyncio.sleep(0.01)
         await asyncio.wait_for(wait_for_expire(), timeout=2)
+        expired = await self.receive_reply()
+        body = json.loads(expired.payload)
+        self.assertEqual(body["code"], "FILE_EXPIRED")
+        self.assertEqual(body["related_message_id"], packet.message_id)
         await self.server.send(self.local.address, packet)
         reply = await self.receive_reply()
         self.assertEqual(json.loads(reply.payload)["code"], "FILE_ID_REUSED")
@@ -241,6 +245,24 @@ class ClientFileOfferTests(unittest.IsolatedAsyncioTestCase):
         await self.chat_marker()
         self.assertEqual(self.receiver.reserved_bytes, 0)
         self.assertTrue(self.server._queue.empty())
+
+    async def test_timeout_notification_send_failure_cleans_other_transfers(self):
+        await self.server.send(self.local.address, offer())
+        await self.receive_reply()
+        original_send = self.local.send
+
+        async def blocked_error(peer, packet):
+            if packet.kind == MessageType.ERROR:
+                await asyncio.Event().wait()
+            await original_send(peer, packet)
+
+        self.now = 46
+        with patch.object(self.local, "send", blocked_error), patch("client.service.FILE_REPLY_TIMEOUT_SECONDS", 0.02):
+            await self.server.send(self.local.address, offer())
+            with self.assertRaises(ExceptionGroup):
+                await asyncio.wait_for(self.task, timeout=2)
+        self.assertEqual(self.receiver.reserved_bytes, 0)
+        self.assertEqual(list(self.root.glob("*.part")), [])
 
     async def test_cancellation_waits_for_disk_before_cleanup(self):
         entered = threading.Event()

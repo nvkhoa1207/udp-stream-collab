@@ -296,6 +296,111 @@ class ClientFileReceiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((update["status"], update["confirmation_delivery"]), ("completed", "failed"))
         self.assertEqual((self.root / f"{self.id}_received.bin").read_bytes(), CONTENT)
 
+    async def test_local_receive_cancel_cleans_and_notifies_original_sender(self):
+        self.assertTrue(await self.client.cancel_receive_file(self.id))
+        reply = await self.reply()
+        self.assertEqual((reply.kind, reply.sender, reply.recipient, reply.stream_id),
+                         (MessageType.FILE_CANCEL, "khoa", "hai", "control"))
+        self.assertEqual(json.loads(reply.payload)["transfer_id"], self.id)
+        update = self.client.poll_file_updates()[0]
+        self.assertEqual((update["status"], update["cancel_delivery"]), ("cancelled", "sent_to_server"))
+        self.assertFalse(update["cleanup_pending"])
+        self.assertEqual(self.receiver.reserved_bytes, 0)
+        self.assertEqual(list(self.root.iterdir()), [])
+        self.assertFalse(await self.client.cancel_receive_file(self.id))
+        await self.send(chunk_packet(self.id, 0))
+        self.assertEqual(json.loads((await self.reply()).payload)["code"], "FILE_CANCELLED")
+
+    async def test_local_cancel_does_not_delete_completed_or_unknown_file(self):
+        self.assertFalse(await self.client.cancel_receive_file(uuid4().hex))
+        with self.assertRaises(ValueError):
+            await self.client.cancel_receive_file("bad")
+        await self.chunks()
+        await self.send(end_packet(self.id))
+        self.assertEqual((await self.reply()).kind, MessageType.FILE_COMPLETE)
+        self.assertFalse(await self.client.cancel_receive_file(self.id))
+        self.assertEqual((self.root / f"{self.id}_received.bin").read_bytes(), CONTENT)
+
+    async def test_local_cancel_send_timeout_reports_failure_without_stopping_worker(self):
+        original = self.local.send
+
+        async def send(peer, packet):
+            if packet.kind == MessageType.FILE_CANCEL:
+                await asyncio.Event().wait()
+            await original(peer, packet)
+
+        with patch.object(self.local, "send", send), patch("client.service.LOCAL_CANCEL_TIMEOUT_SECONDS", 0.02):
+            self.assertTrue(await self.client.cancel_receive_file(self.id))
+        self.assertEqual(self.client.poll_file_updates()[0]["cancel_delivery"], "failed")
+        self.assertEqual(self.receiver.reserved_bytes, 0)
+        self.assertFalse(self.task.done())
+
+    async def test_local_cancel_cleanup_failure_still_stops_sender(self):
+        with patch.object(Path, "unlink", side_effect=PermissionError("busy")):
+            self.assertTrue(await self.client.cancel_receive_file(self.id))
+            update = self.client.poll_file_updates()[0]
+            self.assertEqual(update["status"], "failed")
+            self.assertTrue(update["cleanup_pending"])
+        self.assertEqual((await self.reply()).kind, MessageType.FILE_CANCEL)
+
+    async def test_cancel_queue_is_bounded_and_shutdown_resolves_waiter(self):
+        entered, release = threading.Event(), threading.Event()
+        original = self.receiver.accept_chunk
+
+        def blocked(*args):
+            entered.set()
+            if not release.wait(timeout=3):
+                raise RuntimeError("Test did not release chunk")
+            return original(*args)
+
+        with patch.object(self.receiver, "accept_chunk", blocked):
+            request = None
+            try:
+                await self.send(chunk_packet(self.id, 0))
+                self.assertTrue(await asyncio.to_thread(entered.wait, 1))
+                request = asyncio.create_task(self.client.cancel_receive_file(self.id))
+                await asyncio.sleep(0)
+                while not self.client._file_queue.full():
+                    self.client._file_queue.put_nowait(chunk_packet(self.id, 1))
+                with self.assertRaisesRegex(RuntimeError, "bận"):
+                    await self.client.cancel_receive_file(self.id)
+                self.task.cancel()
+                await asyncio.sleep(0.01)
+            finally:
+                release.set()
+            await asyncio.gather(self.task, return_exceptions=True)
+            with self.assertRaises(ConnectionError):
+                await asyncio.wait_for(request, timeout=1)
+        self.assertEqual(self.receiver.reserved_bytes, 0)
+        with self.assertRaises(RuntimeError):
+            await self.client.cancel_receive_file(self.id)
+
+    async def test_shutdown_during_cancel_io_finishes_snapshot(self):
+        entered, release = threading.Event(), threading.Event()
+        original = self.receiver.cancel
+
+        def blocked(transfer_id):
+            result = original(transfer_id)
+            entered.set()
+            if not release.wait(timeout=3):
+                raise RuntimeError("Test did not release cancel")
+            return result
+
+        with patch.object(self.receiver, "cancel", blocked):
+            request = asyncio.create_task(self.client.cancel_receive_file(self.id))
+            try:
+                self.assertTrue(await asyncio.to_thread(entered.wait, 1))
+                self.task.cancel()
+                await asyncio.sleep(0.01)
+            finally:
+                release.set()
+            await asyncio.gather(self.task, return_exceptions=True)
+            with self.assertRaises(ConnectionError):
+                await asyncio.wait_for(request, timeout=1)
+        update = self.client.poll_file_updates()[0]
+        self.assertEqual((update["status"], update["cancel_delivery"]), ("cancelled", "failed"))
+        self.assertFalse(update["cleanup_pending"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,28 +1,7 @@
 <!doctype html>
-<html lang="vi">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>BTL collaboration — khung UI</title>
-</head>
-<body>
-  <h1>Chat và gửi file trong LAN</h1>
-  <p><strong>KHUNG UI / DỮ LIỆU GIẢ — chưa kết nối mạng.</strong></p>
-  <!-- TODO[K6]: thêm login, trạng thái/lỗi và bridge theo ui/README.md. -->
-  <h2>Người dùng</h2>
-  <ul id="users"></ul>
-  <label for="recipient">Người nhận</label>
-  <select id="recipient"><option value="*">Chat chung</option></select>
-  <h2>Tin nhắn</h2>
-  <ul id="messages" aria-live="polite"></ul>
-  <label for="message">Nội dung</label>
-  <input id="message" type="text">
-  <button id="send-message" type="button" disabled>Gửi — TODO K2/K6</button>
-  <h2>Gửi file</h2>
-  <input id="file" type="file" aria-label="Chọn file">
-  <button id="send-file" type="button" disabled>Gửi file — TODO K4/K6</button>
-  <progress id="progress" value="0" max="100" aria-label="Tiến độ gửi file"></progress>
-  <p id="status">Chưa có kết nối hoặc dữ liệu truyền thật.</p>
-  <script src="app.js"></script>
-</body>
-</html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="client-token" content="{{TOKEN}}"><title>UDP Stream — Client</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body><main><h1>UDP Stream</h1><p id="connection" role="status">Chưa kết nối</p><p id="error" role="alert"></p>
+<section><h2>Kết nối</h2><form id="login"><label>Server<input id="host" value="127.0.0.1" required maxlength="253"></label><label>Cổng TCP<input id="port" type="number" value="9000" min="1" max="65535" required></label><label>Tên đăng nhập<input id="username" pattern="[A-Za-z0-9_-]{1,32}" maxlength="32" autocomplete="username" required></label><label>Mật khẩu<input id="password" type="password" autocomplete="current-password" required></label><button id="login-button">Đăng nhập</button><button id="logout" type="button" disabled>Đăng xuất</button></form></section>
+<section><h2>Trò chuyện</h2><label>Người nhận<select id="recipient" disabled><option value="*">Tất cả</option></select></label><ul id="messages" aria-live="polite"></ul><form id="chat"><label>Tin nhắn<textarea id="text" rows="3" disabled required></textarea></label><small>Tối đa 480 byte UTF-8.</small><button id="send-chat" disabled>Gửi</button></form></section>
+<section><h2>Truyền file</h2><p>Chọn một người nhận riêng. Tối đa 16 MiB. File đến được tự động nhận vào thư mục đã cấu hình.</p><form id="upload"><input id="file" type="file" aria-label="Chọn file" disabled><button id="send-file" disabled>Gửi file</button></form><p id="upload-status" role="status"></p><ul id="files" aria-live="polite"></ul></section>
+<p class="note">Đủ byte chưa phải hoàn tất: cần kiểm tra SHA-256. Kênh hiện chưa có TLS hoặc mã hóa payload.</p></main></body></html>

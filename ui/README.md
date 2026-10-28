@@ -1,8 +1,15 @@
-# UI — Khoa phụ trách
+# UI và HTTP bridge — Khoa
 
-Cập nhật 23/10/2026 theo README. **Đã chọn HTTP bridge cục bộ + polling**;
-`bridge.py` vẫn TODO, `index.html`/`app.js` vẫn là fixture có nút disabled.
-Mở HTML hiện tại chỉ xem khung, chưa đăng nhập/chat/file thật.
+Đã nối HTML/JS với HTTP bridge/core, bỏ fixture. Chạy từ repo:
+
+```bash
+python -m client.main --http-port 8000 --received-dir data/received
+```
+
+Mở http://127.0.0.1:8000. Form đăng nhập, chat, upload nhị phân, polling và hủy
+hai chiều đã có. Thư mục nhận được in ở terminal. Nhập server TCP từ UI, không
+truyền password qua CLI. Transport/server của Hải còn stub nên login thật hiện
+báo 503; không có chế độ giả tự động báo connected. Ctrl+C dọn job/phiên.
 
 ## Cách kết nối đã chọn
 
@@ -18,14 +25,15 @@ Mở HTML hiện tại chỉ xem khung, chưa đăng nhập/chat/file thật.
 - Queue/request worker/upload đều có giới hạn; đợi ACK hoặc ghi file không chặn
   vòng UDP hay giao diện. Bridge chuyển lệnh/sự kiện, không làm lại transport.
 
-## Endpoint bridge dự kiến (chưa triển khai)
+## Endpoint bridge
 
 | Endpoint | Ý nghĩa |
 |---|---|
-| `POST /api/login` | Nhận thông tin server/login và gọi core |
+| `POST /api/login` | `{host,port,username,password}` |
 | `POST /api/messages` | Gửi `{recipient, text}` |
 | `GET /api/events?after=<id>` | Poll users/message/progress/status/error; cursor event còn cần triển khai |
-| `POST /api/files` | Upload bytes có giới hạn, tạo transfer tới một người online |
+| `POST /api/files?recipient=...&name=...` | Body nhị phân tối đa 16 MiB |
+| `POST /api/cancel` | `{direction,transfer_id}`, gửi hoặc nhận |
 | `POST /api/logout` | Logout và dọn phiên |
 
 Không có endpoint để người dùng Accept/Reject file. Core kiểm tra metadata,
@@ -47,15 +55,13 @@ text bằng `textContent`; không đưa password/session vào log hoặc URL.
 
 Hai máy là đủ. Server nghe LAN không làm HTTP bridge nghe LAN: bridge của cả hai
 máy vẫn chỉ localhost. Một máy chạy nhiều client cần cổng HTTP khác nhau, ví dụ
-8000/8001. Đây là cấu hình dự kiến; chưa có cờ `--http-port` hoặc lệnh chạy bridge
-hoàn chỉnh, nên chưa dùng các ví dụ cổng làm hướng dẫn chạy thật.
+8000/8001. HTTP bridge đã có cờ --http-port; phần kết nối LAN vẫn chưa nghiệm thu.
 
-## TODO[K6]
+## Kiểm tra
 
-- [ ] Form login, trạng thái mạng, lỗi và logout.
-- [ ] Online, chọn chat chung/riêng, tin đến cập nhật qua polling.
-- [ ] Input vẫn đáp ứng khi đợi ACK; giới hạn tin nhắn theo byte UTF-8.
-- [ ] File picker, tự nhận file, progress đúng nghĩa và lỗi rõ ràng.
-- [ ] Event ID/cursor, queue hữu hạn và xử lý polling gián đoạn.
-- [ ] Loại fixture khỏi đường chạy thật; chưa nối mạng thì không hiển thị thành công.
-- [ ] Kiểm thử chat đồng thời file/loss và demo hai máy theo README sau khi ghép.
+117 test local đã đạt tại commit bridge. Browser localhost đã kiểm tra form,
+trạng thái chưa kết nối, nút chat/file bị khóa và lỗi transport chưa triển khai.
+JS kiểm tra cú pháp bằng node --check. API có Host/Origin/token, ring 512 event,
+4 job, upload tạm; UI textContent tránh diễn giải nội dung chat thành HTML.
+Khi cursor quá cũ, UI báo mất một phần lịch sử; đây không phải lưu chat lâu dài.
+Cần Hải cung cấp transport/server để nghiệm thu online/chat/file trên UI thật.

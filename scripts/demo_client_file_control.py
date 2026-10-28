@@ -1,6 +1,7 @@
 """Minh họa 100% vẫn chờ COMPLETE, và hủy file đang gửi bằng mock."""
 
 import asyncio
+import argparse
 import json
 import tempfile
 from pathlib import Path
@@ -25,7 +26,7 @@ def show(update):
     print(f"{update['status']}: {update['acknowledged_bytes']}/{update['total_bytes']} byte")
 
 
-async def main():
+async def main(receiver_cancel=False):
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         source = root / "example.bin"
@@ -79,14 +80,19 @@ async def main():
                         break
                     await asyncio.sleep(0.01)
             show(update)
-            await khoa.cancel_file(update["transfer_id"])
+            if receiver_cancel:
+                print("Hải chủ động hủy lượt nhận.")
+                assert await hai.cancel_receive_file(update["transfer_id"])
+            else:
+                await khoa.cancel_file(update["transfer_id"])
             try:
                 await sending
             except FileTransferCancelled:
                 pass
             else:
                 raise AssertionError("Lượt hủy không được báo thành công")
-            await asyncio.wait_for(cancelled.wait(), timeout=3)
+            if not receiver_cancel:
+                await asyncio.wait_for(cancelled.wait(), timeout=3)
             show(khoa.poll_file_updates()[0])
             assert not list(receiver.output_directory.glob("*.part"))
             assert receiver.reserved_bytes == 0
@@ -103,4 +109,6 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--receiver-cancel", action="store_true")
+    asyncio.run(main(parser.parse_args().receiver_cancel))

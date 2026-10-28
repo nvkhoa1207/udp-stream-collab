@@ -1,5 +1,39 @@
 # Tiến độ và kết quả theo phiên bản
 
+## Chốt phần code Khoa và bàn giao — 28/10/2026
+
+- K1–K6 có code client/UI; K8 có báo cáo phần Khoa, README và ảnh browser.
+- Suite 119 ca: 118 PASS, 1 TCP opt-in skip; chạy riêng TCP loopback thật PASS.
+  Thêm runtime upload qua hai ClientService với relay mock, hash/cleanup đúng.
+- K7 mạng thật còn chờ server/transport/codec của Hải; chưa đánh dấu đạt LAN,
+  loss/ACK/window/CUBIC hoặc UI chat/file mạng thật. Xem reports/KHOA_REPORT.md.
+- Commit/push từng phần trên codex/align-protocol-docs, chưa merge main.
+
+
+## Người nhận chủ động hủy file — 28/10/2026
+
+- Thêm cancel_receive_file(id), xử lý qua cùng worker/queue hữu hạn. Dọn .part,
+  trả quota rồi báo CANCEL control về sender; không xóa file đã hoàn tất.
+- Snapshot có cancel_delivery; lỗi gửi không dừng các lượt khác, lỗi dọn giữ
+  cleanup_pending/quota. Shutdown không bỏ người gọi chờ vô hạn.
+- 107 test PASS (6 mới), gồm hủy/ID sai, file hoàn tất, gửi CANCEL timeout,
+  unlink lỗi, queue đầy và shutdown giữa thao tác đĩa. Demo file_control với
+  --receiver-cancel PASS: người nhận hủy tại 1920/5120 byte, sender dừng,
+  không còn .part/quota, file hoàn tất trước đó vẫn nguyên vẹn.
+- Còn login/logout, HTTP/UI và ghép transport/server thật với Hải. Đây là
+  kiểm thử mock/local, chưa nghiệm thu mạng thật.
+
+## Báo hết hạn chủ động về sender — 28/10/2026
+
+- Khi expire dọn thành công, ERROR FILE_EXPIRED đi control, liên hệ META gốc.
+  Cũng xử lý expire bên trong begin file mới; mỗi thông báo được lấy gửi một lần.
+- Cache ERROR để END muộn nhận lại cùng kết quả; giữ dấu ID chống mở lại.
+  Gửi thông báo có deadline 10s; lỗi vẫn truyền ra caller và cleanup worker.
+- 101 test PASS, gồm thông báo đúng META/người nhận, không phát lặp, expire
+  ngầm khi mở file, shutdown và lỗi gửi thông báo. Demo_client_receive_status
+  PASS với ERROR FILE_EXPIRED; vẫn mock/đồng hồ giả, chưa UDP thật.
+- Còn login/logout, nút hủy nhận local, HTTP/UI và tích hợp mạng với Hải.
+
 ## Đóng gói các bài học thành commit — 28/10/2026
 
 - USER_LIST: commit `bab2dd0`, snapshot riêng qua 27 test cùng demo_client_users
@@ -182,8 +216,7 @@ Ba demo file/chat có assertion để exit khác 0 khi kết quả sai. Không d
 - Client login chưa hoàn chỉnh. USER_LIST, nhận META/CHUNK/END/CANCEL,
   send_file với ACCEPT/COMPLETE/ERROR/CANCEL và snapshot hai chiều đã có theo
   các mục 27–28/10; server phát danh sách và vòng đời phiên chưa ghép.
-- FileReceiver đã nối worker nhận, snapshot và expire/shutdown; còn timeout
-  chủ động báo qua mạng về sender và nút hủy lượt nhận local. Chưa xong toàn bộ K4/K5.
+- FileReceiver đã nối worker nhận, snapshot và expire/shutdown; đã có API hủy lượt nhận local; chưa ghép UI/mạng thật để nghiệm thu K4/K5.
 - Queue event hữu hạn, snapshot progress gộp và worker đĩa đã có nhưng chưa
   được ghép/test với mạng; UI/bridge vẫn TODO/fixture.
 - T01–T22 trong [nghiệm thu](04_ACCEPTANCE.md) **chưa chạy trên ứng dụng thật**.
@@ -203,3 +236,27 @@ mới trong ngày 23/10 và không mô tả main hiện tại:
 Bảng này được giữ để giải thích nhận xét “code mới chỉ ở máy Khoa”. README chính
 hiện mô tả source đi cùng phiên bản tài liệu, không dùng mốc 463c8b3 làm tiến độ
 mới. Chỉ sau review/merge mới cập nhật main và xác nhận Hải đã lấy đúng commit.
+
+## Commit login/lifecycle — 28/10/2026
+
+ClientService.login có TCP HELLO/AUTH, BIND, heartbeat và logout. 112 test PASS
+(5 mới cho record TCP, BIND và lifecycle). Chưa chạy mạng thật do transport/server
+của Hải còn stub. Bridge/UI và entrypoint là commit tiếp theo.
+
+## Commit HTTP bridge — 28/10/2026
+
+Bridge/runtime có API phiên/chat/file/cancel/polling, Host/Origin/token, upload
+16 MiB và 4 job, ring 512 event. 117 test PASS (5 mới: runtime, cleanup, HTTP
+đầu vào/nguồn). UI thật và entrypoint được nối ở commit tiếp theo.
+
+## Commit UI/entrypoint — 28/10/2026
+
+Form login, online/chat, file/progress/cancel hai chiều nối HTTP API, không còn
+fixture. client.main mở localhost UI; password chỉ nhập form. 117 test PASS,
+node --check PASS. Browser localhost: form hoạt động, login báo đúng transport
+stub (503), chat/file vẫn disabled; ảnh reports/client-ui-check.png. Chưa có
+bằng chứng UI chat/file qua mạng thật vì phụ thuộc Hải.
+
+## Hải — tích hợp A3 ngày 28/10/2026
+Merge origin/codex/align-protocol-docs 2999d08 vào hai/server-transport. Client/server dùng chung strict TCP reader và giới hạn password 1–128 ký tự. Server quét phiên định kỳ và dọn khi close. Regression: 170 tests, 169 pass, 1 optional network test skipped; test_team_auth dùng TCP thật với server nhóm. Sandbox Windows kẹt socketpair nên test chạy ngoài sandbox.
+
