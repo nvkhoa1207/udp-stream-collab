@@ -272,3 +272,7 @@ Selective ACK theo stream/chiều, retry hữu hạn backoff tối đa 4s, dedup
 ## Hải — giai đoạn 4
 Selective Repeat pipeline, reorder 8 packet/stream; credit tuyệt đối, initial 0, probe có giới hạn nhịp và stall deadline. Control có buffer dành trước; ACTIVE/DRAINING/CLOSED, tombstone đến hết phiên, quota lịch sử 4096 tính cả stream đang hoạt động. Cache payload kết quả file vẫn do FileOfferReceiver giữ 120s. Regression 180 tests: 179 pass, 1 skip. Đã thử 140 stream UDP nối tiếp, quota/zero-window/reorder/mất update; kết nối tín hiệu kết thúc file vào application ở giai đoạn relay.
 
+
+## Hải — giai đoạn 5
+CUBIC rút gọn (RFC 9438: C=.4, beta=.7), byte budget/cwnd/bytes-in-flight dùng chung mỗi peer, pacing theo RTT, một lần giảm cho recovery flight, ACK mới mới tăng. Clock unit test điều khiển được; UDP thật delay 6ms, mất DATA đầu và ACK trùng đạt. Không HyStart++, ECN, fast convergence, spurious-loss undo; phát hiện loss bằng RTO. Regression 184 tests: 183 pass, 1 skip.
+

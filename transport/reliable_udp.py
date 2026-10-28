@@ -8,6 +8,7 @@ from common.codec import decode_packet, encode_packet
 from common.config import MAX_DATAGRAM_BYTES
 from common.config import RECEIVE_WINDOW_PACKETS, MAX_RECEIVE_STREAMS
 from common.models import MessageType as M, Packet, ReceivedPacket
+from transport.congestion import CongestionController
 
 
 @dataclass
@@ -69,6 +70,8 @@ class ReliableUdpTransport:
         self.probe_seconds = probe_seconds
         self.stall_seconds = stall_seconds
         self.max_streams = max_streams
+        self._congestion = {}
+        self._congestion_changed = {}
 
     def register_peer(self, peer, session_id):
         host, port = peer
@@ -85,6 +88,8 @@ class ReliableUdpTransport:
                 raise ValueError('No reserved control buffer available')
             self._rx[(peer, 'control')] = _ReceiveStream()
         self._peers[peer] = session_id
+        self._congestion.setdefault(peer, CongestionController())
+        self._congestion_changed.setdefault(peer, asyncio.Event())
 
     def remove_peer(self, peer):
         self._peers.pop(peer, None)
@@ -101,6 +106,10 @@ class ReliableUdpTransport:
         for key in list(self._draining):
             if key[0] == peer:
                 del self._draining[key]
+        self._congestion.pop(peer, None)
+        wake = self._congestion_changed.pop(peer, None)
+        if wake is not None:
+            wake.set()
 
     def _fail_stream(self, key, error):
         if key in self._tx:
@@ -246,6 +255,10 @@ class ReliableUdpTransport:
         pending_key = (*key, packet.seq)
         future = asyncio.get_running_loop().create_future()
         self._pending[pending_key] = future
+        cc = self._congestion[peer]
+        wake = self._congestion_changed[peer]
+        size = len(encode_packet(packet))
+        reserved = False
         try:
             loop = asyncio.get_running_loop()
             progress_at, old_limit = loop.time(), state.limit
@@ -264,15 +277,39 @@ class ReliableUdpTransport:
                     await asyncio.wait_for(state.changed.wait(), max(0.001, state.probe_at - loop.time()))
                 except TimeoutError:
                     pass
+            congestion_deadline = loop.time() + self.stall_seconds
+            while cc.budget_bytes() < size or loop.time() < cc.next_send:
+                if state.error is not None:
+                    raise state.error
+                if loop.time() >= congestion_deadline:
+                    raise TimeoutError('Congestion budget stalled')
+                wake.clear()
+                delay = max(0.001, cc.next_send - loop.time()) if cc.budget_bytes() >= size else 0.1
+                try:
+                    await asyncio.wait_for(wake.wait(), delay)
+                except TimeoutError:
+                    pass
+            ticket = cc.on_sent(size)
+            reserved = True
+            sent_at = loop.time()
             for attempt in range(self.max_retries + 1):
+                if attempt:
+                    delay = max(0, cc.next_send - loop.time())
+                    if delay:
+                        await asyncio.sleep(delay)
+                    cc.next_send = loop.time() + max(0.0001, cc.rtt * size / cc.cwnd)
                 self._write(peer, packet)
                 try:
                     result = await asyncio.wait_for(asyncio.shield(future),
                         min(4.0, self.retry_seconds * 2 ** attempt))
                     if result is not None:
                         raise result
+                    cc.on_ack(size, loop.time() - sent_at if attempt == 0 else 0)
+                    reserved = False
+                    wake.set()
                     return
                 except TimeoutError:
+                    cc.on_loss(size, ticket=ticket)
                     if attempt == self.max_retries:
                         raise TimeoutError('UDP retry limit reached')
         except BaseException:
@@ -280,6 +317,9 @@ class ReliableUdpTransport:
             self.finish_stream(peer, packet.stream_id, success=False)
             raise
         finally:
+            if reserved:
+                cc.discard(size)
+                wake.set()
             self._pending.pop(pending_key, None)
             if key in self._draining:
                 self.finish_stream(*key, success=self._draining[key])
@@ -321,6 +361,10 @@ class ReliableUdpTransport:
         self._tx.clear()
         self._tombstones.clear()
         self._draining.clear()
+        self._congestion.clear()
+        for wake in self._congestion_changed.values():
+            wake.set()
+        self._congestion_changed.clear()
         while not self._incoming.empty():
             self._incoming.get_nowait()
         self._incoming.put_nowait(None)
