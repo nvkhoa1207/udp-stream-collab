@@ -232,3 +232,9 @@ mới. Chỉ sau review/merge mới cập nhật main và xác nhận Hải đã
 ClientService.login có TCP HELLO/AUTH, BIND, heartbeat và logout. 112 test PASS
 (5 mới cho record TCP, BIND và lifecycle). Chưa chạy mạng thật do transport/server
 của Hải còn stub. Bridge/UI và entrypoint là commit tiếp theo.
+
+## Commit HTTP bridge — 28/10/2026
+
+Bridge/runtime có API phiên/chat/file/cancel/polling, Host/Origin/token, upload
+16 MiB và 4 job, ring 512 event. 117 test PASS (5 mới: runtime, cleanup, HTTP
+đầu vào/nguồn). UI thật và entrypoint được nối ở commit tiếp theo.

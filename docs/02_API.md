@@ -337,3 +337,16 @@ thu hồi transport sau lỗi. Không log password/session; phiên mới dùng i
 Transport phải hỗ trợ bootstrap BIND send không đợi DATA ACK; BIND_OK giao cho
 consumer bootstrap trước khi đưa dữ liệu nghiệp vụ vào vòng nhận. Transport
 thật hiện vẫn stub của Hải; API này đã test với fake, chưa nghiệm thu mạng thật.
+
+## HTTP bridge đã triển khai
+
+ui.bridge dùng HTTPServer tuần tự trên 127.0.0.1, socket timeout 10s; core chạy
+trên event loop riêng. Host phải đúng 127.0.0.1:port; POST cần Origin cùng origin
+và X-Client-Token cấp trong HTML, API GET cũng cần token. Không log request/body.
+POST /api/login {host,port,username,password}, /messages {recipient,text},
+/logout {}, /cancel {direction,transfer_id}. POST /api/files?name=...&recipient=...
+nhận body nhị phân Content-Length tối đa 16 MiB, không cho traversal, dọn upload
+khi job xong/hủy. Chỉ 4 job; event ring 512, GET /api/events?after=N trả events,
+cursor, reset, connected. reset báo cursor cũ bị bỏ, UI phải hiển thị mất lịch sử.
+File snapshot lấy cùng ring; sender nhận lỗi job qua event error. Login thật
+hiện trả 503 khi gọi transport stub; không giả vờ kết nối thành công.
