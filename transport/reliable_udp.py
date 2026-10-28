@@ -72,6 +72,14 @@ class ReliableUdpTransport:
         self.max_streams = max_streams
         self._congestion = {}
         self._congestion_changed = {}
+        self._ready_blocked = set()
+        self.delivery_ready = None
+        self._delivery_changed = asyncio.Event()
+        self.identity = None
+        self.last_received = 0.0
+
+    def notify_delivery(self):
+        self._delivery_changed.set()
 
     def register_peer(self, peer, session_id):
         host, port = peer
@@ -107,6 +115,7 @@ class ReliableUdpTransport:
             if key[0] == peer:
                 del self._draining[key]
         self._congestion.pop(peer, None)
+        self._ready_blocked = {k for k in self._ready_blocked if k[0] != peer}
         wake = self._congestion_changed.pop(peer, None)
         if wake is not None:
             wake.set()
@@ -146,7 +155,7 @@ class ReliableUdpTransport:
         return stream_id in history or len(history) < 4096
 
     def _control(self, peer, packet, kind, **kwargs):
-        self._write(peer, Packet(kind=kind, sender=packet.recipient if packet.recipient != '*' else 'server',
+        self._write(peer, Packet(kind=kind, sender=self.identity or (packet.recipient if packet.recipient != '*' else 'server'),
             recipient=packet.sender, stream_id=packet.stream_id,
             session_id=packet.session_id, **kwargs))
 
@@ -173,8 +182,10 @@ class ReliableUdpTransport:
             raise ValueError('Unknown endpoint/session')
         if self.authorize is not None and not self.authorize(peer, packet):
             raise ValueError('Packet rejected by session policy')
+        self.last_received = asyncio.get_running_loop().time()
         if packet.kind in (M.BIND_OK, M.HEARTBEAT):
             self._incoming.put_nowait(ReceivedPacket(peer, packet))
+            self.notify_delivery()
             return
         key = (peer, packet.stream_id)
         if packet.kind == M.ACK:
@@ -222,6 +233,19 @@ class ReliableUdpTransport:
         while state.queued + 1 in state.packets and not self._incoming.full():
             state.queued += 1
             self._incoming.put_nowait(ReceivedPacket(key[0], state.packets[state.queued]))
+            self.notify_delivery()
+        if state.queued + 1 in state.packets:
+            self._ready_blocked.add(key)
+        else:
+            self._ready_blocked.discard(key)
+
+    def _refill_ready(self):
+        for key in tuple(self._ready_blocked):
+            state = self._rx.get(key)
+            if state is None:
+                self._ready_blocked.discard(key)
+            else:
+                self._queue_ready(key, state)
 
     async def send(self, peer, packet):
         if peer not in self._peers:
@@ -326,25 +350,35 @@ class ReliableUdpTransport:
 
     async def receive(self):
         while True:
-            received = await self._incoming.get()
-            if received is None:
-                self._incoming.put_nowait(None)
-                raise ConnectionError('Transport closed')
-            key = (received.peer, received.packet.stream_id)
-            if self._peers.get(received.peer) != received.packet.session_id:
-                continue
-            state = self._rx.get(key)
-            if received.packet.seq:
-                if state is None:
+            for _ in range(self._incoming.qsize()):
+                received = self._incoming.get_nowait()
+                if received is None:
+                    self._incoming.put_nowait(None)
+                    raise ConnectionError('Transport closed')
+                key = (received.peer, received.packet.stream_id)
+                if self._peers.get(received.peer) != received.packet.session_id:
+                    self._refill_ready()
                     continue
-                state.consumed = received.packet.seq
-                state.packets.pop(state.consumed, None)
-                self._control(received.peer, received.packet, M.WINDOW_UPDATE,
-                              recv_limit=state.consumed + RECEIVE_WINDOW_PACKETS)
-                self._queue_ready(key, state)
-                if key in self._draining:
-                    self.finish_stream(*key, success=self._draining[key])
-            return received
+                state = self._rx.get(key)
+                if received.packet.seq and state is None:
+                    self._refill_ready()
+                    continue
+                if ((received.packet.seq and received.packet.seq != state.consumed + 1)
+                        or (self.delivery_ready is not None and not self.delivery_ready(received))):
+                    self._incoming.put_nowait(received)
+                    continue
+                if received.packet.seq:
+                    state.consumed = received.packet.seq
+                    state.packets.pop(state.consumed, None)
+                    self._control(received.peer, received.packet, M.WINDOW_UPDATE,
+                                  recv_limit=state.consumed + RECEIVE_WINDOW_PACKETS)
+                    self._queue_ready(key, state)
+                    if key in self._draining:
+                        self.finish_stream(*key, success=self._draining[key])
+                self._refill_ready()
+                return received
+            self._delivery_changed.clear()
+            await self._delivery_changed.wait()
 
     async def close(self):
         if self._closed:
@@ -361,6 +395,7 @@ class ReliableUdpTransport:
         self._tx.clear()
         self._tombstones.clear()
         self._draining.clear()
+        self._ready_blocked.clear()
         self._congestion.clear()
         for wake in self._congestion_changed.values():
             wake.set()
@@ -368,3 +403,4 @@ class ReliableUdpTransport:
         while not self._incoming.empty():
             self._incoming.get_nowait()
         self._incoming.put_nowait(None)
+        self.notify_delivery()

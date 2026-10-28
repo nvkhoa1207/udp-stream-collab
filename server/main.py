@@ -12,7 +12,7 @@ from server.auth import AuthService
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="TCP login server (A3)"
+        description="TCP login + reliable UDP chat/file relay"
     )
 
     parser.add_argument("--host", default="127.0.0.1")
@@ -21,7 +21,7 @@ def main() -> None:
         "--udp-port",
         type=int,
         default=UDP_PORT,
-        help="Cổng công bố trong AUTH_OK; chưa mở UDP ở A3",
+        help="Cổng UDP chat/file",
     )
 
     args = parser.parse_args()
@@ -52,6 +52,7 @@ def main() -> None:
             tcp_port=args.tcp_port,
             udp_port=args.udp_port,
             auth=auth,
+            enable_udp=True,
         )
         asyncio.run(app.run())
 

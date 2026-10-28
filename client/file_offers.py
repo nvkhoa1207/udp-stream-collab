@@ -38,6 +38,7 @@ class FileOfferReceiver:
         self._local_cancelling: set[str] = set()
         self._offers: dict[str, Packet] = {}
         self._notifications: dict[str, Packet] = {}
+        self._terminal_streams: dict[str, bool] = {}
 
     def _update(self, transfer_id, **changes):
         if self.updates is not None:
@@ -46,6 +47,8 @@ class FileOfferReceiver:
     def _settle(self, transfer_id, status, **changes):
         self._offers.pop(transfer_id, None)
         pending = self.receiver is not None and transfer_id in self.receiver.transfers
+        if status != 'completed':
+            self._terminal_streams[transfer_id] = False
         self._update(transfer_id, status=status, cleanup_pending=pending, **changes)
         if pending:
             self._watching.add(transfer_id)
@@ -82,6 +85,11 @@ class FileOfferReceiver:
         replies = list(self._notifications.values())
         self._notifications.clear()
         return replies
+
+    def take_terminal_streams(self):
+        terminal = list(self._terminal_streams.items())
+        self._terminal_streams.clear()
+        return terminal
 
     def _valid_address(self, packet: Packet) -> bool:
         return (packet.recipient == self.username
@@ -179,6 +187,7 @@ class FileOfferReceiver:
 
     def note_reply(self, reply: Packet, delivered: bool):
         if reply.kind == MessageType.FILE_COMPLETE:
+            self._terminal_streams[reply.stream_id] = delivered
             self._update(reply.stream_id, confirmation_delivery="sent_to_server" if delivered else "failed")
             self._confirming.discard(reply.stream_id)
 
@@ -327,3 +336,4 @@ class FileOfferReceiver:
             self.results.clear()
             self._offers.clear()
             self._notifications.clear()
+            self._terminal_streams.clear()

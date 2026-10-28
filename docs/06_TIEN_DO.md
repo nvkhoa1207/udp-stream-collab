@@ -276,3 +276,7 @@ Selective Repeat pipeline, reorder 8 packet/stream; credit tuyệt đối, initi
 ## Hải — giai đoạn 5
 CUBIC rút gọn (RFC 9438: C=.4, beta=.7), byte budget/cwnd/bytes-in-flight dùng chung mỗi peer, pacing theo RTT, một lần giảm cho recovery flight, ACK mới mới tăng. Clock unit test điều khiển được; UDP thật delay 6ms, mất DATA đầu và ACK trùng đạt. Không HyStart++, ECN, fast convergence, spurious-loss undo; phát hiện loss bằng RTO. Regression 184 tests: 183 pass, 1 skip.
 
+
+## Hải — giai đoạn 6
+Server relay chat riêng/chung, file hai chặng giữ message_id và stream file, seq/session mới mỗi chặng; chat ra ánh xạ stream theo sender. USER_LIST phân trang/revision, heartbeat echo, logout/expire dọn phiên/job/transport; thông báo CANCEL/ERROR khi peer mất. Queue relay 16 + 8 send/stream, tối đa 256 worker; receive giữ credit khi downstream đầy để chat khác tiếp tục. Client nối đóng stream với COMPLETE/error/cancel/expire và phát ERROR chat tới UI. Tài khoản server được dành riêng. Regression 189 tests: 188 pass, 1 skip. Team TCP/UDP E2E đạt file rỗng/Unicode/binary/1 MiB, hai sender, broadcast, disconnect, hủy cả hai phía, gửi tiếp sau hủy. File 1 MiB lần regression: 5.186s (loopback, không debug; không phải LAN/netem).
+

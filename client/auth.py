@@ -20,7 +20,7 @@ async def write_record(writer, value):
 
 
 async def authenticate(peer, username, password):
-    if re.fullmatch(r'[A-Za-z0-9_-]{1,32}', username) is None:
+    if type(username) is not str or username == 'server' or re.fullmatch(r'[A-Za-z0-9_-]{1,32}', username) is None:
         raise ValueError('Username không hợp lệ')
     if type(password) is not str or not 1 <= len(password) <= 128:
         raise ValueError('Mật khẩu rỗng hoặc quá dài')

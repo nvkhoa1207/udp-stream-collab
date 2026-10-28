@@ -18,12 +18,15 @@ class PasswordRecord:
 class AuthService:
     def __init__(self) -> None:
         self._accounts: dict[str, PasswordRecord] = {}
-        self._dummy = self._make_record(secrets.token_hex(16))
+        # A random dummy digest needs no expensive hash during event-loop construction;
+        # unknown usernames still perform the full PBKDF2 verification in a thread.
+        self._dummy = PasswordRecord(secrets.token_bytes(16), secrets.token_bytes(32), 600_000)
 
     @staticmethod
     def _valid_credentials(username: str, password: str) -> bool:
         return (
             isinstance(username, str)
+            and username != 'server'
             and re.fullmatch(r"[A-Za-z0-9_-]{1,32}", username) is not None
             and isinstance(password, str)
             and 1 <= len(password) <= 128

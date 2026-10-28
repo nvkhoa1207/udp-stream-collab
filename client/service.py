@@ -49,6 +49,23 @@ class ClientService:
         self._file_worker_running = False
         self._file_sender = None
         self._sent_file_count = 0
+        if hasattr(type(transport), 'notify_delivery'):
+            transport.identity = username
+            transport.delivery_ready = self._can_receive
+
+    def _can_receive(self, received):
+        packet = received.packet
+        if packet.kind in (MessageType.FILE_META, MessageType.FILE_CHUNK,
+                           MessageType.FILE_END, MessageType.FILE_CANCEL):
+            return not self._file_queue.full()
+        if packet.kind in (MessageType.MSG, MessageType.USER_LIST):
+            return not self.events.full()
+        return True
+
+    def _finish_stream(self, transfer_id, success):
+        method = getattr(type(self.transport), 'finish_stream', None)
+        if method is not None:
+            method(self.transport, self.server_peer, transfer_id, success=success)
 
     async def login(self, password: str) -> None:
         if self.tcp_peer is None or self._login_attempted or self._receive_started:
@@ -83,6 +100,11 @@ class ClientService:
     async def _heartbeat(self):
         while True:
             await asyncio.sleep(3)
+            if (hasattr(type(self.transport), 'notify_delivery')
+                    and asyncio.get_running_loop().time() - self.transport.last_received > 10):
+                raise TimeoutError('Server heartbeat timed out')
+            if hasattr(type(self.transport), 'notify_delivery'):
+                self.transport.notify_delivery()
             await asyncio.wait_for(self.transport.send(self.server_peer, Packet(
                 kind=MessageType.HEARTBEAT, sender=self.username, recipient="server",
                 stream_id="control", session_id=self.session_id)), timeout=3)
@@ -155,6 +177,7 @@ class ClientService:
         try:
             await sender.run(Path(path))
         finally:
+            self._finish_stream(sender.transfer_id, sender.completed.is_set())
             self._file_sender = None
 
     def poll_file_updates(self) -> list[dict]:
@@ -214,6 +237,7 @@ class ClientService:
             pass  # Snapshot báo gửi hủy lỗi; không làm dừng các lượt nhận khác.
         finally:
             await self._file_io(self.file_offers.note_local_cancel, request.transfer_id, delivery)
+            self._finish_stream(request.transfer_id, False)
         if not request.result.done():
             request.result.set_result(True)
 
@@ -235,6 +259,8 @@ class ClientService:
                 await self._send_file_notifications()
                 try:
                     packet = await asyncio.wait_for(self._file_queue.get(), timeout=1)
+                    if hasattr(type(self.transport), 'notify_delivery'):
+                        self.transport.notify_delivery()
                 except TimeoutError:
                     continue
                 try:
@@ -257,6 +283,15 @@ class ClientService:
                             delivered = True
                         finally:
                             await self._file_io(self.file_offers.note_reply, reply, delivered)
+                        if reply.kind == MessageType.FILE_COMPLETE:
+                            self._finish_stream(reply.stream_id, delivered)
+                        elif reply.kind == MessageType.ERROR:
+                            transfer_id = packet.stream_id
+                            if packet.kind == MessageType.FILE_CANCEL:
+                                from client.file_cancel import cancelled_transfer_id
+                                transfer_id = cancelled_transfer_id(packet)
+                            if transfer_id:
+                                self._finish_stream(transfer_id, False)
                 finally:
                     self._file_queue.task_done()
         finally:
@@ -275,6 +310,8 @@ class ClientService:
         for reply in await self._file_io(self.file_offers.take_notifications):
             await asyncio.wait_for(self.transport.send(self.server_peer, reply),
                                    timeout=FILE_REPLY_TIMEOUT_SECONDS)
+        for transfer_id, success in await self._file_io(self.file_offers.take_terminal_streams):
+            self._finish_stream(transfer_id, success)
 
     async def _receive_loop(self) -> None:
         while True:
@@ -298,6 +335,14 @@ class ClientService:
             elif packet.kind in (MessageType.FILE_ACCEPT, MessageType.FILE_COMPLETE, MessageType.ERROR):
                 if self._file_sender is not None:
                     self._file_sender.handle(packet)
+                if packet.kind == MessageType.ERROR:
+                    try:
+                        import json
+                        message = json.loads(packet.payload)['message']
+                        if type(message) is str:
+                            self.events.put_nowait({'type': 'error', 'message': message[:480]})
+                    except (ValueError, KeyError, TypeError, UnicodeError, asyncio.QueueFull):
+                        pass
 
             elif packet.kind in (MessageType.FILE_META, MessageType.FILE_CHUNK, MessageType.FILE_END):
                 if packet.recipient == self.username:

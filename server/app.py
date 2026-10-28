@@ -9,6 +9,7 @@ from server.auth import AuthService
 from server.sessions import SessionRegistry
 from common.models import MessageType, Packet
 from transport.reliable_udp import ReliableUdpTransport
+from server.router import Router
 
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,10 @@ class ServerApp:
         self._tasks: set[asyncio.Task] = set()
         self._writers: set[asyncio.StreamWriter] = set()
         self._maintenance_task = None
+        self._udp_task = None
+        self.router = Router(self.transport, self.sessions) if self.transport else None
+        if self.transport is not None:
+            self.transport.identity = 'server'
 
     @property
     def address(self) -> tuple[str, int]:
@@ -68,11 +73,15 @@ class ServerApp:
         if self.transport is not None:
             await self.transport.start()
             self.udp_port = self.transport.local_address[1]
-        self._server = await asyncio.start_server(
-            self._accept_client,
-            self.host,
-            self.tcp_port,
-        )
+        try:
+            self._server = await asyncio.start_server(
+                self._accept_client, self.host, self.tcp_port)
+        except BaseException:
+            if self.transport is not None:
+                await self.transport.close()
+            raise
+        if self.transport is not None:
+            self._udp_task = asyncio.create_task(self._udp_loop())
         self._maintenance_task = asyncio.create_task(self._maintenance())
 
         logger.info(
@@ -225,6 +234,12 @@ class ServerApp:
 
 
     async def close(self) -> None:
+        if self._udp_task is not None:
+            self._udp_task.cancel()
+            await asyncio.gather(self._udp_task, return_exceptions=True)
+            self._udp_task = None
+        if self.router is not None:
+            await self.router.close()
         if self._maintenance_task is not None:
             self._maintenance_task.cancel()
             await asyncio.gather(self._maintenance_task, return_exceptions=True)
@@ -259,7 +274,15 @@ class ServerApp:
             await asyncio.sleep(0.1)
             for session in self.sessions.sweep():
                 if self.transport is not None and session.peer is not None:
-                    self.transport.remove_peer(session.peer)
+                    self.router.peer_removed(session)
+            if self.router is not None:
+                self.router.publish_users()
+                self.router.expire()
+
+    async def _udp_loop(self):
+        while True:
+            received = await self.transport.receive()
+            await self.router.handle(received)
 
     def _bind(self, peer, packet):
         session = self.sessions.get(packet.session_id)
@@ -267,10 +290,15 @@ class ServerApp:
                 or packet.stream_id != 'control'):
             raise ValueError('Invalid BIND identity')
         self.sessions.bind_peer(packet.session_id, peer)
-        self.transport.register_peer(peer, packet.session_id)
+        try:
+            self.transport.register_peer(peer, packet.session_id)
+        except ValueError:
+            self.sessions.remove(packet.session_id)
+            raise
         self.transport._write(peer, Packet(kind=MessageType.BIND_OK,
             sender='server', recipient=session.username, stream_id='control',
             session_id=packet.session_id))
+        self.router.publish_users()
 
     def _authorize(self, peer, packet):
         session = self.sessions.get(packet.session_id)

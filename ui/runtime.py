@@ -30,6 +30,8 @@ class ClientRuntime:
             client = self.client
             while not client.events.empty():
                 self.emit(client.events.get_nowait())
+            if hasattr(type(client.transport), 'notify_delivery'):
+                client.transport.notify_delivery()
             for event in client.poll_file_updates():
                 self.emit(event)
             await asyncio.sleep(0.1)
