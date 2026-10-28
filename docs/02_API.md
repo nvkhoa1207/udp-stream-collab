@@ -1,6 +1,6 @@
 # API để code song song
 
-Cập nhật 24/10/2026 theo [README](../README.md) và [giao thức](01_PROTOCOL.md).
+Cập nhật 28/10/2026 theo [README](../README.md) và [giao thức](01_PROTOCOL.md).
 Nguồn code: `common/contracts.py`, `common/models.py`. Các hàm còn
 `NotImplementedError` là TODO, không phải tính năng đã chạy.
 
@@ -74,12 +74,14 @@ dấu flow control hoàn thành chỉ vì constructor Packet nhận được fie
 - `send_chat(recipient, text)` đã kiểm tra recipient, rỗng và giới hạn 480 byte
   UTF-8, tạo MSG rồi gọi transport. Mock gửi được; chưa chứng minh chat mạng thật.
 - `receive_events()` hiện nhận MSG hợp lệ về endpoint/recipient, giải mã UTF-8
-  và đưa vào `events` (queue tối đa 100). USER_LIST/file/error còn TODO.
+  và đưa vào `events` (queue tối đa 100). USER_LIST từ server được ghép đủ trang
+  cùng revision rồi phát event users; file/error nghiệp vụ còn TODO.
 - Một consumer gọi transport.receive() rồi dispatch. Không để mỗi transfer gọi
   receive riêng và lấy mất gói của nhau. Event đầy phải có backpressure/gộp tiến
   độ phù hợp; vòng UDP vẫn cần tiếp tục xử lý ACK/window độc lập.
 - Event hiện có: `{type: "message", sender, recipient, text}` và lỗi UTF-8.
-  Event users/progress/status/error nghiệp vụ sẽ được bổ sung khi ghép chức năng.
+  Event users có dạng `{type: "users", revision, users}`. Progress/status/error
+  nghiệp vụ sẽ được bổ sung khi ghép chức năng.
 - `FileReceiver.begin/accept_chunk/finish` đã xử lý file local, trùng/sai thứ tự,
   size/hash, quota và dọn file (chi tiết bên dưới). `send_file()` và luồng META → ACCEPT tự động → CHUNK → END → COMPLETE
   chưa triển khai; hash local không chứng minh truyền file qua mạng.
@@ -136,3 +138,10 @@ phục hồi transfer hoặc tự xóa file mồ côi của phiên/process trư�
 Quota FileReceiver và quota stream độc lập. Hải triển khai thu hồi buffer khi
 stream CLOSED, giữ dấu chống trùng nhỏ đến hết phiên theo protocol mục 6.1.
 Client dispatcher/timer chưa ghép; các API local này chưa chứng minh file mạng.
+
+## Ghép danh sách online ở client
+
+UserListAssembler kiểm tra JSON/schema/username, giới hạn 128 trang và 1024
+username; bỏ trang trùng/revision cũ và chỉ phát danh sách đầy đủ. Trang lỗi không
+phá dữ liệu hợp lệ. Mỗi phiên mới dùng ClientService mới để reset revision.
+Demo: `python -m scripts.demo_client_users`; chưa chứng minh server/UDP thật.

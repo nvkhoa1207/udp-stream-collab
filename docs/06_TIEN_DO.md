@@ -1,5 +1,12 @@
 # Tiến độ và kết quả theo phiên bản
 
+## Commit K2: danh sách online — 28/10/2026
+
+- Ghép USER_LIST theo revision, kiểm tra schema/username, bỏ trang trùng/cũ.
+- Dispatcher vẫn nhận chat khi danh sách chưa đầy đủ.
+- Kiểm tra snapshot commit: 27 test local; demo_client_users và demo_client_chat.
+- Client file dispatcher/login/UI vẫn cần triển khai ở các commit sau.
+
 ## Bổ sung theo review của Hải — 24/10/2026
 
 - FileReceiver đã validate schema/hash/tên/ID, quota size/tổng byte/transfer/chunk,

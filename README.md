@@ -279,7 +279,7 @@ hạn; không tuyên bố chống nghe lén hay giả mạo chủ động. Phầ
 |---|---|
 | Packet, MessageType, Transport, mock | Có; model thêm recv_limit và WINDOW_UPDATE/PROBE |
 | Chia file, build_metadata, FileReceiver | Có xử lý local: metadata/hash/quota, ghép/dedup, cancel/expire/close |
-| ClientService.send_chat và event MSG | Có, chạy qua mock; user/file/error dispatcher chưa đủ |
+| ClientService.send_chat và event MSG/USER_LIST | Có, chạy qua mock; file/error dispatcher chưa đủ |
 | demo_mock, demo_file_chunks, demo_client_chat, demo_file_receiver | Có trong cây nguồn |
 | register_peer(peer, session_id) | Chữ ký đã bỏ khóa; xử lý đăng ký vẫn TODO |
 | Login/send_file, codec, server/auth/session/router | TODO |
@@ -485,3 +485,8 @@ Theo đề, nộp ZIP hoặc liên kết GitHub private, chứa:
 Trước khi nộp, thử lại trên máy còn lại và kiểm tra hình thức nộp/trạng thái repo.
 Không đưa `.venv`, dữ liệu cá nhân, mật khẩu, private key hoặc khóa phiên vào
 bản nộp. Báo cáo ghi đúng tính năng đã chạy và giới hạn còn lại.
+
+### Demo danh sách online
+
+Chạy `python -m scripts.demo_client_users`: ghép USER_LIST nhiều trang, vẫn
+nhận chat khi thiếu trang. Chỉ dùng mock trong một process, chưa có UDP thật.

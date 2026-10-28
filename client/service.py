@@ -6,6 +6,7 @@ from pathlib import Path
 from common.config import MAX_PAYLOAD_BYTES
 from common.contracts import Transport
 from common.models import MessageType, Packet, Peer
+from client.user_list import UserListAssembler
 
 
 class ClientService:
@@ -14,6 +15,7 @@ class ClientService:
         self.server_peer = server_peer
         self.username = username
         self.events = asyncio.Queue(maxsize=100)
+        self.user_list = UserListAssembler()
 
     async def login(self, password: str) -> None:
         # TODO[K1]: handshake TCP + auth; AUTH_OK trả session_id, không trả khóa.
@@ -67,7 +69,18 @@ class ClientService:
             if packet.recipient not in (self.username, "*"):
                 continue
 
-            if packet.kind == MessageType.MSG:
+            if packet.kind == MessageType.USER_LIST:
+                if packet.sender != "server":
+                    continue
+                try:
+                    event = self.user_list.add(packet.payload)
+                except ValueError as exc:
+                    await self.events.put({"type": "error", "message": str(exc)})
+                    continue
+                if event is not None:
+                    await self.events.put(event)
+
+            elif packet.kind == MessageType.MSG:
                 try:
                     text = packet.payload.decode("utf-8")
 
