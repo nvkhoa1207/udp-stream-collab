@@ -43,7 +43,7 @@ class SessionRegistry:
         self._sessions: dict[str, Session] = {}
 
     def create(self, username: str, tcp_ip: str) -> str:
-        if not isinstance(username, str) or re.fullmatch(
+        if not isinstance(username, str) or username == 'server' or re.fullmatch(
             r"[A-Za-z0-9_-]{1,32}", username
         ) is None:
             raise ValueError("Username không hợp lệ")

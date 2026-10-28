@@ -2,9 +2,11 @@
 import argparse
 from pathlib import Path
 from ui.bridge import run_bridge
+from common.config import configure_console
 
 
 def main():
+    configure_console()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--http-port', type=int, default=8000)
     parser.add_argument('--received-dir', type=Path, default=Path('data/received'))

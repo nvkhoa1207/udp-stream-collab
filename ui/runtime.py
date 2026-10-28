@@ -5,6 +5,7 @@ from pathlib import Path
 from client.service import ClientService
 from client.files import FileReceiver
 from transport.reliable_udp import ReliableUdpTransport
+from client.file_cancel import FileTransferCancelled
 
 
 class ClientRuntime:
@@ -45,7 +46,9 @@ class ClientRuntime:
         host, port, username = body['host'], body['port'], body['username']
         if type(host) is not str or not host or len(host) > 253 or type(port) is not int or not 1 <= port <= 65535:
             raise ValueError('Server không hợp lệ')
-        client = self.factory(host, port, username)
+        # FileReceiver construction may create a directory on a slow filesystem.
+        # Construct outside the core loop; asyncio primitives bind lazily at login.
+        client = await asyncio.to_thread(self.factory, host, port, username)
         try:
             await client.login(body['password'])
         except BaseException:
@@ -66,6 +69,8 @@ class ClientRuntime:
                 await awaitable
             except asyncio.CancelledError:
                 raise
+            except FileTransferCancelled:
+                pass  # The file snapshot already describes this requested cancellation.
             except Exception as error:
                 self.emit(dict(type='error', message='Thao tác không hoàn tất: ' + type(error).__name__))
             finally:

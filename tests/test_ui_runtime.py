@@ -7,6 +7,15 @@ from ui.runtime import ClientRuntime
 
 
 class RuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_requested_file_cancel_uses_snapshot_without_generic_error(self):
+        from client.file_cancel import FileTransferCancelled
+        runtime = ClientRuntime(Path('.'))
+        async def cancelled():
+            raise FileTransferCancelled('test cancellation')
+        runtime.start_job(cancelled())
+        await asyncio.gather(*tuple(runtime.jobs))
+        self.assertFalse(runtime.events)
+
     async def test_disconnected_operations_rejected_and_cursor_bounded(self):
         runtime = ClientRuntime(Path('.'))
         with self.assertRaises(ValueError):

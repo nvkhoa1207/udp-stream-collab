@@ -1,9 +1,10 @@
 # Giao thức v1 — hợp đồng triển khai chung
 
-Cập nhật 28/10/2026 theo phạm vi trong [README](../README.md) và
+Cập nhật 29/10/2026 theo phạm vi trong [README](../README.md) và
 [cuộc trò chuyện đối chiếu](https://chatgpt.com/share/6adb5bb8-0280-83ec-9f78-4044c8b17269).
-Đây là lựa chọn kỹ thuật của nhóm. **Model/API đã cập nhật; codec và transport
-mạng vẫn TODO**, chưa phải giao thức đã chạy hoặc được nghiệm thu.
+Đây là lựa chọn kỹ thuật của nhóm. Bản tích hợp 29/10/2026 đã chạy codec,
+transport, server/client và HTTP/UI trên UDP loopback thật. LAN/netem chưa chạy.
+Bằng chứng và giới hạn ở 04_ACCEPTANCE.md; các nhật ký cũ không thay tiến độ mới.
 
 ## 1. Kiến trúc đã chọn
 
@@ -30,7 +31,7 @@ Mỗi record TCP là prefix độ dài 4 byte big-endian + JSON UTF-8, body tố
 | `AUTH_ERROR` | `code`, `message` — không chứa bí mật |
 
 Tài khoản demo tạo trước, mật khẩu lưu bằng hàm băm có salt. Username dài 1–32
-ký tự ASCII `[A-Za-z0-9_-]`; `*` dành riêng cho chat chung. Từ chối username đang
+ký tự ASCII `[A-Za-z0-9_-]`; `*` dành riêng cho chat chung, `server` dành cho server. Từ chối username đang
 sử dụng. Session ID ngẫu nhiên 128-bit, biểu diễn 32 ký tự hex, chỉ giữ trong RAM.
 
 1. AUTH đúng tạo phiên đang chờ BIND; chưa đưa user vào danh sách online.
@@ -176,8 +177,8 @@ Sau `WINDOW_STALL_TIMEOUT_SECONDS=10` giây không tăng credit khi đang bị c
 báo timeout và kết thúc stream; phản hồi cùng limit không reset deadline.
 Không ngừng retry DATA đã gửi chỉ vì đang hết credit cho DATA mới.
 
-Đây mới là **hợp đồng và field trong model**. A6 còn phải triển khai state,
-buffer, probe timer, kiểm tra quota và các kịch bản T17–T22 trong bảng nghiệm thu.
+State, buffer, probe timer và quota đã triển khai; test_udp_flow.py kiểm tra
+T17–T22 ở transport. network_acceptance chạy hơn 128 file đầu-cuối thật.
 
 ### 6.1. Thu hồi stream và chống trùng (Hải triển khai)
 
@@ -213,10 +214,10 @@ stream từng xuất hiện trong phiên. Tách ba loại trạng thái:
   server cũng phải hữu hạn. Nhờ vậy có thể chạy hơn 128 file nối tiếp mà không
   giữ 128 buffer mãi; bộ nhớ lịch sử vẫn có trần và packet cũ không tái tạo file.
 
-Đây là hợp đồng lifecycle, chưa có code transport. Khi ghép, Hải cần nối tín
-hiệu kết thúc nghiệp vụ với state transport; không thêm API release từng packet.
-Thử >128 file nối tiếp, mất ACK COMPLETE, DATA/META/probe đến muộn, đủ quota
-CLOSED và session reconnect theo T21/T22 trước khi đánh dấu hoàn thành.
+Lifecycle đã có code và tín hiệu kết thúc từ client/server qua finish_stream;
+không thêm API release từng packet.
+Đã thử 140 file nối tiếp, mất ACK COMPLETE và packet muộn trên socket thật.
+Quota 4096 và clock/cache được kiểm tra unit; chưa chạy 4096 file qua LAN.
 
 ## 7. File tự động nhận
 
@@ -281,3 +282,27 @@ packet, phải thỏa cả hai điều kiện khi gửi. Cần cửa sổ tăng 
 thời gian, giảm khi loss, xử lý timeout và tránh tăng do ACK trùng; fixed window
 và retry đơn thuần chưa phải CUBIC. Đo loss/delay và ghi rõ phần giản lược, không
 khẳng định tuân thủ đầy đủ [RFC 9438](https://www.rfc-editor.org/rfc/rfc9438.html).
+
+## 9. Ghi chú triển khai 29/10/2026
+
+Transport thật có `finish_stream(peer, stream_id, success=True)` cho tín hiệu
+kết thúc nghiệp vụ. Thành công chuyển DRAINING, đợi send/buffer đã nhận xả rồi
+CLOSED; lỗi đóng ngay. Tombstone giữ consumed_seq và outcome, không giữ payload.
+Cache kết quả FILE_COMPLETE/ERROR 120s thuộc FileOfferReceiver; retry transport
+không giao nghiệp vụ lại. ACK chỉ hợp lệ cho DATA đã thực sự phát, không phải
+sequence mới dành chỗ đang chờ credit. Không tăng cwnd vì ACK trùng/đến muộn đã xử lý.
+
+Receive admission hook nội bộ giữ packet/credit khi queue relay/file/event đầy,
+đồng thời chọn packet sẵn sàng của stream khác; callback UDP vẫn xử lý ACK/window.
+Hook không đổi bốn API Transport chung. Queue relay 16 và tối đa 8 send/worker;
+256 worker, 64 relay transfer, 4 transfer liên quan mỗi session, 65540 reference/transfer.
+Control có slot nhận trước BIND. Tổng rx stream 128, tx stream 512, pending send 1024.
+Quota lịch sử file 4096/peer bao gồm ACTIVE và CLOSED, ngoài control/chat lâu dài.
+
+Heartbeat server phản hồi để client phát hiện server im lặng sau 10s. ERROR
+không còn reference sau CANCEL/kết thúc được bỏ qua, không sinh ERROR đáp ERROR.
+USER_LIST chưa gửi được gộp về revision mới nhất, retry lịch phát khi queue bận.
+CUBIC rút gọn C=.4, beta=.7, mss quy đổi 1200 byte, cwnd ban đầu 9600 byte,
+trần 307200 byte, sàn sau loss 2400 byte. ACK tăng theo target cubic với Reno floor;
+loss dùng RTO và giảm một lần mỗi recovery flight. Không có HyStart++, ECN, fast
+convergence hay khôi phục spurious loss; không phải triển khai đầy đủ RFC 9438.

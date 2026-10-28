@@ -1,0 +1,69 @@
+"""Local browser fixture: real server and two real HTTP/UDP clients.
+
+Test accounts hai/khoa use the explicit non-secret fixture 'test-password'.
+Never use this fixture on an untrusted network. Production uses server.main.
+"""
+import argparse
+import asyncio
+import secrets
+import tempfile
+import threading
+from http.server import HTTPServer
+from pathlib import Path
+
+from server.app import ServerApp
+from server.auth import AuthService
+from ui.bridge import make_handler
+from ui.runtime import ClientRuntime
+
+
+async def run(seconds, slow_file_seconds=0):
+    auth = AuthService()
+    for username in ('hai', 'khoa'):
+        await asyncio.to_thread(auth.add_user, username, 'test-password')
+    app = ServerApp(tcp_port=19000, udp_port=19001, auth=auth, enable_udp=True)
+    await app.start()
+    with tempfile.TemporaryDirectory(prefix='btl-browser-') as folder:
+        loop = asyncio.get_running_loop()
+        runtimes = [ClientRuntime(Path(folder) / name) for name in ('hai', 'khoa')]
+        if slow_file_seconds:
+            from common.models import MessageType
+            for runtime in runtimes:
+                def factory(host, port, username, runtime=runtime):
+                    client = runtime.make_client(host, port, username)
+                    send = client.transport.send
+                    async def slow_send(peer, packet):
+                        if packet.kind == MessageType.FILE_CHUNK:
+                            await asyncio.sleep(slow_file_seconds)
+                        return await send(peer, packet)
+                    client.transport.send = slow_send
+                    return client
+                runtime.factory = factory
+        servers = [HTTPServer(('127.0.0.1', 18000+i), make_handler(runtime, loop, secrets.token_hex(32)))
+                   for i, runtime in enumerate(runtimes)]
+        threads = [threading.Thread(target=s.serve_forever, daemon=True) for s in servers]
+        for thread in threads:
+            thread.start()
+        print('Browser fixture ready: TCP 19000, UDP 19001, HTTP 18000/18001', flush=True)
+        try:
+            await asyncio.sleep(seconds)
+        finally:
+            for runtime in runtimes:
+                await runtime.close()
+            for server in servers:
+                await asyncio.to_thread(server.shutdown)
+                server.server_close()
+            for thread in threads:
+                await asyncio.to_thread(thread.join, 2)
+            await app.close()
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--seconds', type=int, default=600)
+    parser.add_argument('--slow-file-seconds', type=float, default=0)
+    args = parser.parse_args()
+    try:
+        asyncio.run(run(args.seconds, args.slow_file_seconds))
+    except KeyboardInterrupt:
+        pass

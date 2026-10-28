@@ -1,4 +1,4 @@
-"""Server TCP handshake; đăng nhập và UDP sẽ bổ sung sau."""
+"""TCP authentication and optional reliable UDP relay with bounded lifecycle."""
 
 import asyncio
 import logging

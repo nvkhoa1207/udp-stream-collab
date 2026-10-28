@@ -1,5 +1,44 @@
 # Tiến độ và kết quả theo phiên bản
 
+## Hiện tại — Hải ghép đầu-cuối, 29/10/2026
+
+Nhánh `hai/server-transport`, đã fetch/merge Khoa `2999d08`; không merge main.
+Các mục phía dưới là lịch sử theo thời điểm, không thay trạng thái hiện tại.
+
+- Hoàn thành codec/TCP/auth/session/BIND, reliable UDP Selective Repeat, window/
+  reorder/probe/lifecycle, CUBIC rút gọn, server relay/heartbeat/online và ghép UI.
+- 202/202 unittest PASS khi bật BTL_NETWORK_TEST=1, không skip; 11 lượt demo
+  mock/local PASS trong thư mục tạm. JS syntax và Compose config PASS.
+- Team TCP/UDP E2E: auth đúng/sai/trùng/timeout, bootstrap mất/lặp/sai nguồn,
+  chat chung/riêng/nhiều sender, file rỗng/binary/Unicode/1MiB, hủy hai chiều,
+  missing chunk/hash/path traversal, giả sender/session/endpoint, offline cleanup.
+- 20 client + 1KiB/1MiB/10MiB/16MiB + 140 file nối tiếp PASS 152,723s;
+  file 10 MiB: 55,780 s / 16 MiB: 83,699 s; chat xen file10,87–19,23ms. 10 client riêng PASS.
+- 4096 file thật trong một phiên, chặn quota ở app/transport, control/logout
+  vẫn hoạt động, reconnect cả hai client rồi gửi mới: PASS 109,243s.
+- Fault seed 7 loss 7% delay/reorder 6 ms: PASS; file 64 KiB: 3,119 s, chat 154,66 ms,
+  96 drop/29 duplicate/1145 lượt ghi, 19 CC loss event server. Đây là fault
+  injection trong chương trình quanh UDP socket, không phải netem.
+- HTTP hai bridge thật login/chat/upload/progress/poll/logout PASS; browser
+  thật đã chat, file1200byte completed hai phía và hủy từ cả hai phía. Fixture
+  hủy trì hoãn send chunk15s để đủ thời gian bấm; vẫn TCP/UDP/ACK thật.
+- Sửa UTF-8 HTML/CLI Windows (kể cả pipe cp1252), burst USER_LIST thiếu trang, ACK cho DATA chưa phát,
+  quota file chặn LOGOUT, race relay lỗi trước sweep, ERROR đáp ERROR sau CANCEL
+  và hủy bị trình bày thành lỗi thao tác chung. Broadcast không chờ đích đầy
+  queue; đích khác nhận tiếp và sender được RELAY_BUSY cho đích bận. Close dùng cleanup task chung,
+  caller cancel không ngắt dọn; send/future/buffer/socket được thu hồi.
+- Đã dọn fixture/file thử/tiến trình test. Không commit `.venv`, secret, data
+  truyền thử hoặc output sinh ra. Báo cáo Khoa giữ nguyên; bổ sung HAI_REPORT.md.
+- LAN hai máy/T16 chưa chạy. Docker CLI có nhưng Engine pipe không tồn tại;
+  Dockerfile/Compose/netem script chuẩn bị, chưa build/run. TTL120s dùng clock unit.
+- Báo cáo Hải Markdown để ghép PDF nhóm; README/07_WINDOWS_LAN_DOCKER có lệnh
+  Windows và các bước người vận hành còn phải chạy.
+
+Commit 1–6 đã push: `6d72852`, `125e0de`, `f3410f6`, `1c4c777`, `f7f651f`,
+`2ce7432`. Commit giai đoạn7 là commit bàn giao chứa mục hiện tại; xem git log.
+
+## Nhật ký trước bản tích hợp
+
 ## Chốt phần code Khoa và bàn giao — 28/10/2026
 
 - K1–K6 có code client/UI; K8 có báo cáo phần Khoa, README và ảnh browser.

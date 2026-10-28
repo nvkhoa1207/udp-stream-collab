@@ -1,0 +1,15 @@
+services:
+  server:
+    build: .
+    image: btl-udp-collab:local
+    stdin_open: true
+    tty: true
+    ports:
+      - "127.0.0.1:9000:9000/tcp"
+      - "127.0.0.1:9001:9001/udp"
+  netem:
+    build: .
+    image: btl-udp-collab:local
+    profiles: ["test"]
+    cap_add: ["NET_ADMIN"]
+    command: ["sh", "scripts/netem_acceptance.sh"]

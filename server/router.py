@@ -31,6 +31,7 @@ class Router:
         self._references = {}
         self.failures = 0
         self.closed = False
+        self._users_dirty = set()
         transport.delivery_ready = self.can_accept
 
     @staticmethod
@@ -42,6 +43,10 @@ class Router:
     def can_accept(self, received):
         packet = received.packet
         if packet.kind in (M.HEARTBEAT, M.LOGOUT):
+            return True
+        if packet.kind == M.MSG and packet.recipient == '*':
+            # Fan-out must reach available destinations even if one queue is full.
+            # handle() reports RELAY_BUSY for that destination to the sender.
             return True
         targets = [s for s in self.sessions.active() if
                    (packet.recipient == '*' and s.username != packet.sender)
@@ -108,7 +113,7 @@ class Router:
             self.failures += 1
             if origin is not None:
                 self._error(origin, packet, 'RELAY_FAILED', 'Destination unavailable or relay timed out')
-                self._finish(packet.stream_id, success=False)
+                self._abort_transfer(packet.stream_id, 'File relay failed')
 
     def _error(self, target, packet, code, message):
         reply = Packet(kind=M.ERROR, sender='server', recipient=target.username,
@@ -124,22 +129,56 @@ class Router:
             for session in (transfer.sender, transfer.receiver):
                 self.transport.finish_stream(session.peer, transfer_id, success=success)
 
+    def _abort_transfer(self, transfer_id, reason):
+        transfer = self.transfers.get(transfer_id)
+        if transfer is not None:
+            for target, other in ((transfer.sender, transfer.receiver),
+                                  (transfer.receiver, transfer.sender)):
+                try:
+                    self.sessions.get(target.session_id)
+                except ValueError:
+                    continue
+                self._enqueue(target, Packet(kind=M.FILE_CANCEL, sender=other.username,
+                    recipient=target.username, stream_id='control', payload=json.dumps(dict(
+                    transfer_id=transfer_id, reason=reason)).encode()))
+            self._finish(transfer_id, success=False)
+
     def publish_users(self):
         active = self.sessions.active()
         names = tuple(sorted(s.username for s in active))
-        if names == self._online:
+        if names == self._online and not self._users_dirty:
             return
-        self._online = names
-        self.revision += 1
+        if names != self._online:
+            self._online = names
+            self.revision += 1
+            self._users_dirty = {s.session_id for s in active}
         # At most 8 usernames (32 ASCII bytes each) keeps payload and encoded packet bounded.
         pages = [list(names[i:i+8]) for i in range(0, len(names), 8)] or [[]]
         for session in active:
+            if session.session_id not in self._users_dirty:
+                continue
+            queue = self._queues.get((session.peer, 'control'))
+            if queue is not None:
+                keep = []
+                while not queue.empty():
+                    item = queue.get_nowait()
+                    queue.task_done()
+                    if item[1].kind != M.USER_LIST:
+                        keep.append(item)
+                for item in keep:
+                    queue.put_nowait(item)
+                if queue.maxsize - queue.qsize() < len(pages):
+                    continue
+            all_sent = True
             for page, users in enumerate(pages):
                 packet = Packet(kind=M.USER_LIST, sender='server', recipient=session.username,
                     stream_id='control', payload=json.dumps(dict(revision=self.revision,
                     page=page, pages=len(pages), users=users), separators=(',', ':')).encode())
                 if not self._enqueue(session, packet):
-                    self.failures += 1
+                    all_sent = False
+            if all_sent:
+                self._users_dirty.discard(session.session_id)
+        self._users_dirty.intersection_update(s.session_id for s in active)
 
     async def handle(self, received):
         packet = received.packet
@@ -181,7 +220,7 @@ class Router:
         target = next((s for s in self.sessions.active() if s.username == packet.recipient), None)
         if target is None:
             self._error(source, packet, 'USER_OFFLINE', 'Recipient is offline')
-            self._finish(packet.stream_id, success=False)
+            self._abort_transfer(packet.stream_id, 'Transfer peer is offline')
             self.transport.finish_stream(source.peer, packet.stream_id, success=False)
             return
         try:
@@ -199,7 +238,9 @@ class Router:
                     raise ValueError()
                 transfer_id = self._references.get(body['related_message_id'])
                 if transfer_id is None:
-                    raise ValueError()
+                    # Terminal CANCEL/COMPLETE may already have removed relay state.
+                    # Do not start an ERROR-about-ERROR chain for a late reply.
+                    return
             if type(transfer_id) is not str or re.fullmatch('[0-9a-f]{32}', transfer_id) is None:
                 raise ValueError()
             transfer = self.transfers.get(transfer_id)
@@ -230,7 +271,7 @@ class Router:
                 raise ValueError()
             if not self._enqueue(target, packet, source):
                 self._error(source, packet, 'RELAY_BUSY', 'Relay queue quota reached')
-                self._finish(transfer_id, success=False)
+                self._abort_transfer(transfer_id, 'Relay queue quota reached')
         except (ValueError, TypeError, KeyError, UnicodeError, RecursionError):
             self._error(source, packet, 'BAD_FILE_STATE', 'Invalid file operation or quota reached')
             self.transport.finish_stream(source.peer, packet.stream_id, success=False)
@@ -257,7 +298,7 @@ class Router:
                 fake = Packet(kind=M.FILE_META, sender='server', recipient=transfer.sender.username,
                     stream_id=transfer_id, message_id=transfer.meta_id)
                 self._error(transfer.sender, fake, 'RELAY_TIMEOUT', 'File relay expired')
-                self._finish(transfer_id, success=False)
+                self._abort_transfer(transfer_id, 'File relay expired')
 
     async def close(self):
         self.closed = True
@@ -269,3 +310,4 @@ class Router:
         self._queues.clear()
         self.transfers.clear()
         self._references.clear()
+        self._users_dirty.clear()

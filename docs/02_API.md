@@ -1,8 +1,8 @@
 # API để code song song
 
-Cập nhật 28/10/2026 theo [README](../README.md) và [giao thức](01_PROTOCOL.md).
-Nguồn code: `common/contracts.py`, `common/models.py`. Các hàm còn
-`NotImplementedError` là TODO, không phải tính năng đã chạy.
+Cập nhật 29/10/2026 theo [README](../README.md) và [giao thức](01_PROTOCOL.md).
+Nguồn code: `common/contracts.py`, `common/models.py`. Transport/server/client/UI đã ghép qua TCP/UDP thật ngày 29/10/2026;
+PayloadCipher tùy chọn không nằm trên đường chạy bắt buộc.
 
 ## Transport chung
 
@@ -29,8 +29,8 @@ transport.register_peer(peer, session_id)
 ```
 
 Chữ ký trong `transport/reliable_udp.py` **không có tx_key/rx_key**, không tạo
-khóa giả và không gọi PayloadCipher. Hàm hiện vẫn TODO, chưa lưu trạng thái thật.
-Khi triển khai A3/A6 phải tuân:
+khóa giả và không gọi PayloadCipher. Hàm đã lưu mapping thật, dành buffer control và kiểm tra xung đột.
+Hợp đồng:
 
 - `peer`: địa chỉ UDP đã resolve, port hợp lệ; session_id hex 32 ký tự do server
   cấp sau AUTH. Đăng ký không mở socket, không tự làm user online.
@@ -64,16 +64,16 @@ chỉ tăng limit khi giao packet đúng thứ tự qua receive(). Chi tiết qu
 UPDATE, retry và timeout ở [protocol mục 6](01_PROTOCOL.md#6-flow-control-đã-chốt-recv_limit-theo-packet).
 CongestionController trả ngân sách **byte** riêng; send phải tuân cả hai.
 
-Model/enum/config đã có, codec và hành vi flow control vẫn A1/A6/A7. Không đánh
-dấu flow control hoàn thành chỉ vì constructor Packet nhận được field mới.
+Codec/flow control đã triển khai và kiểm thử socket thật. Đọc test_udp_flow.py
+và báo cáo Hải để phân biệt ca transport với nghiệm thu LAN chưa chạy.
 
 ## Client, file và UI
 
 - `ClientService(transport, server_peer, username, *, file_receiver=None)` giữ
   ba tham số vị trí cũ; có thể truyền FileReceiver riêng bằng keyword để bật
-  nhận file. Cấu hình TCP/login còn K1; `server_peer` là endpoint UDP.
+  nhận file. Có keyword tcp_peer=(host, port) cho login; `server_peer` là endpoint UDP.
 - `send_chat(recipient, text)` đã kiểm tra recipient, rỗng và giới hạn 480 byte
-  UTF-8, tạo MSG rồi gọi transport. Mock gửi được; chưa chứng minh chat mạng thật.
+  UTF-8, tạo MSG rồi gọi transport. Đã thử mock và server nhóm qua UDP thật.
 - `receive_events()` nhận MSG hợp lệ về endpoint/recipient, giải mã UTF-8
   và đưa vào `events` (queue tối đa 100). USER_LIST từ sender `server` được gom
   đủ trang cùng revision rồi phát event. FILE_META/CHUNK/END gửi riêng được
@@ -86,11 +86,11 @@ dấu flow control hoàn thành chỉ vì constructor Packet nhận được fie
 - Event hiện có: `{type: "message", sender, recipient, text}`,
   `{type: "users", revision, users}` và `{type: "error", message}` cho lỗi
   UTF-8/USER_LIST. Snapshot file hai chiều lấy riêng qua poll_file_updates để
-  không nhồi hàng nghìn progress vào queue chat. ERROR của chat còn TODO.
+  không nhồi hàng nghìn progress vào queue chat. ERROR chat đã phát event an toàn cho UI.
 - `UserListAssembler` chỉ giữ một revision đang gom, tối đa 128 trang và 1024
   username phía client. Trang lỗi không phá state hợp lệ; trang trùng/revision
   cũ không phát lại event. Khi bắt đầu phiên mới phải dùng assembler mới để
-  không mang revision cũ sang phiên khác; login/logout tích hợp vẫn TODO.
+  không mang revision cũ sang phiên khác; login/logout đã ghép và kiểm tra server nhóm.
 - `FileReceiver.begin/accept_chunk/finish` đã xử lý file local, trùng/sai thứ tự,
   size/hash, quota và dọn file (chi tiết bên dưới). Phía nhận đã nối META →
   ACCEPT, CHUNK → END → COMPLETE qua mock; `send_file()` đã chạy cùng bên nhận. Kiểm tra
@@ -301,7 +301,7 @@ phục hồi transfer hoặc tự xóa file mồ côi của phiên/process trư�
 
 Quota FileReceiver và quota stream độc lập. Hải triển khai thu hồi buffer khi
 stream CLOSED, giữ dấu chống trùng nhỏ đến hết phiên theo protocol mục 6.1.
-Client dispatcher/timer chưa ghép; các API local này chưa chứng minh file mạng.
+Client dispatcher/timer đã ghép; test_team_e2e và network_acceptance kiểm tra file mạng thật.
 
 ### Người nhận chủ động hủy file
 
@@ -323,7 +323,7 @@ Client dispatcher/timer chưa ghép; các API local này chưa chứng minh file
   thái pending. Caller hủy task yêu cầu trước khi worker bắt đầu thì bỏ yêu
   cầu; nếu đã bắt đầu thì worker tiếp tục cleanup/báo hủy.
 - Demo: `python -m scripts.demo_client_file_control --receiver-cancel`.
-  Đây là API core qua mock; nút trên HTTP/UI vẫn chưa triển khai.
+  API core và nút HTTP/UI đã ghép, kiểm tra core mạng thật và thao tác browser.
 
 ## Client login/lifecycle
 
@@ -336,7 +336,7 @@ phiên làm mất trạng thái connected và hủy task còn lại. Caller ph�
 thu hồi transport sau lỗi. Không log password/session; phiên mới dùng instance mới.
 Transport phải hỗ trợ bootstrap BIND send không đợi DATA ACK; BIND_OK giao cho
 consumer bootstrap trước khi đưa dữ liệu nghiệp vụ vào vòng nhận. Transport
-thật hiện vẫn stub của Hải; API này đã test với fake, chưa nghiệm thu mạng thật.
+thật đã ghép và có test server nhóm, gồm sai mật khẩu, trùng phiên và BIND timeout.
 
 ## HTTP bridge đã triển khai
 
@@ -349,4 +349,21 @@ nhận body nhị phân Content-Length tối đa 16 MiB, không cho traversal, d
 khi job xong/hủy. Chỉ 4 job; event ring 512, GET /api/events?after=N trả events,
 cursor, reset, connected. reset báo cursor cũ bị bỏ, UI phải hiển thị mất lịch sử.
 File snapshot lấy cùng ring; sender nhận lỗi job qua event error. Login thật
-hiện trả 503 khi gọi transport stub; không giả vờ kết nối thành công.
+đã nối server; lỗi kết nối trả 503, sai mật khẩu trả 401. UI đọc UTF-8 trên Windows.
+
+## Lifecycle và backpressure transport thật
+
+`finish_stream(peer, stream_id, *, success=True)` đóng stream file sau COMPLETE
+đã ACK; success=False khi ERROR/CANCEL/expire. ACTIVE → DRAINING → CLOSED nhả
+payload buffer, giữ tombstone consumed_seq/outcome tới hết phiên; không áp dụng
+cho control/chat. ClientService và Router đã gọi hook, mock không cần implement.
+`remove_peer(peer)` fail các send đang chờ và dọn mapping/state khi logout/expire.
+
+`delivery_ready(ReceivedPacket) -> bool` và `notify_delivery()` là hook nội bộ
+transport thật: giữ credit khi queue đích đầy, chỉ giao theo thứ tự stream;
+stream khác vẫn được receive. UI runtime/worker báo khi có chỗ. Bốn API chung
+vẫn start/send/receive/close. Caller tự dùng API receive trực tiếp không cần hook.
+
+`ServerApp(..., enable_udp=True)` bật UDP/router. server.main luôn bật; mặc định
+False chỉ phục vụ test TCP cũ tách biệt. tcp_port=0/udp_port=0 dành test cấp cổng
+tạm; production CLI yêu cầu cổng 1..65535. start rollback socket UDP nếu TCP bind lỗi.

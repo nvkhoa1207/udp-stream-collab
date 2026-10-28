@@ -1,16 +1,17 @@
-"""Chạy TCP server với tài khoản demo nhập khi khởi động."""
+"""Chạy TCP login và UDP relay; tài khoản demo nhập khi khởi động."""
 
 import argparse
 import asyncio
 import getpass
 import logging
 
-from common.config import TCP_PORT, UDP_PORT
+from common.config import TCP_PORT, UDP_PORT, configure_console
 from server.app import ServerApp
 from server.auth import AuthService
 
 
 def main() -> None:
+    configure_console()
     parser = argparse.ArgumentParser(
         description="TCP login + reliable UDP chat/file relay"
     )

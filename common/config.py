@@ -16,3 +16,11 @@ RECEIVE_WINDOW_PACKETS = 8  # Số slot giữ packet của mỗi stream được
 WINDOW_PROBE_SECONDS = 1.0
 WINDOW_STALL_TIMEOUT_SECONDS = 10.0
 MAX_RECEIVE_STREAMS = 128  # Tổng stream được cấp buffer trên một transport.
+
+
+def configure_console() -> None:
+    """Keep Vietnamese CLI output valid in Windows terminals and redirected pipes."""
+    import sys
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='backslashreplace')

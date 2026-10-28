@@ -8,8 +8,8 @@ python -m client.main --http-port 8000 --received-dir data/received
 
 Mở http://127.0.0.1:8000. Form đăng nhập, chat, upload nhị phân, polling và hủy
 hai chiều đã có. Thư mục nhận được in ở terminal. Nhập server TCP từ UI, không
-truyền password qua CLI. Transport/server của Hải còn stub nên login thật hiện
-báo 503; không có chế độ giả tự động báo connected. Ctrl+C dọn job/phiên.
+truyền password qua CLI. Transport/server đã ghép thật; chạy server.main và hai client theo README.
+Sai mật khẩu trả 401, mất kết nối trả 503; không có fixture thay tính năng thật. Ctrl+C dọn job/phiên.
 
 ## Cách kết nối đã chọn
 
@@ -31,7 +31,7 @@ báo 503; không có chế độ giả tự động báo connected. Ctrl+C dọn
 |---|---|
 | `POST /api/login` | `{host,port,username,password}` |
 | `POST /api/messages` | Gửi `{recipient, text}` |
-| `GET /api/events?after=<id>` | Poll users/message/progress/status/error; cursor event còn cần triển khai |
+| `GET /api/events?after=<id>` | Poll users/message/progress/status/error; cursor/ring 512 event đã có |
 | `POST /api/files?recipient=...&name=...` | Body nhị phân tối đa 16 MiB |
 | `POST /api/cancel` | `{direction,transfer_id}`, gửi hoặc nhận |
 | `POST /api/logout` | Logout và dọn phiên |
@@ -41,8 +41,8 @@ chuẩn bị nơi lưu rồi tự trả FILE_ACCEPT; lỗi thì ERROR. UI hiển
 Tiến độ sender phản ánh byte ACK đến server; 100% ở chặng này là “chờ xác minh”,
 chỉ FILE_COMPLETE đúng size/hash mới thành “hoàn tất”. ACK chat chưa phải đã đọc.
 
-Upload cần giới hạn body/file tạm, không nhét file lớn vào JSON/base64. Khi
-triển khai, kiểm tra Host/Origin và token API cục bộ, bind loopback, hiển thị
+Upload cần giới hạn body/file tạm, không nhét file lớn vào JSON/base64. Bridge đã
+kiểm tra Host/Origin và token API cục bộ, bind loopback, hiển thị
 text bằng `textContent`; không đưa password/session vào log hoặc URL.
 
 ## Demo hai máy sau khi ghép mạng
@@ -59,9 +59,13 @@ máy vẫn chỉ localhost. Một máy chạy nhiều client cần cổng HTTP k
 
 ## Kiểm tra
 
-117 test local đã đạt tại commit bridge. Browser localhost đã kiểm tra form,
+Ghi nhận cũ: 117 test local đạt tại commit bridge. Browser localhost đã kiểm tra form,
 trạng thái chưa kết nối, nút chat/file bị khóa và lỗi transport chưa triển khai.
 JS kiểm tra cú pháp bằng node --check. API có Host/Origin/token, ring 512 event,
 4 job, upload tạm; UI textContent tránh diễn giải nội dung chat thành HTML.
 Khi cursor quá cũ, UI báo mất một phần lịch sử; đây không phải lưu chat lâu dài.
-Cần Hải cung cấp transport/server để nghiệm thu online/chat/file trên UI thật.
+Ngày 29/10/2026 đã thử hai browser: login, online, chat, file 1200 byte completed
+hai phía và hủy từ sender/receiver. Hủy dùng fixture chậm 15s trước mỗi send chunk
+để thao tác nút; không thay ACK/socket thật. HTTP E2E còn kiểm tra upload/poll/logout
+với backend thật, không factory mock. Đã sửa đọc HTML UTF-8 trên Windows và bỏ
+ERROR đáp ERROR sau CANCEL. LAN hai máy/Docker vẫn chưa chạy.

@@ -79,3 +79,14 @@ class ReliabilityTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(TimeoutError):
             await self.a.send(self.b.local_address, self.packet)
         self.assertGreater(self.b.rejected, 0)
+
+    async def test_ack_for_reserved_but_unsent_data_cannot_grant_credit(self):
+        self.b._write = lambda *args: None
+        send = asyncio.create_task(self.a.send(self.b.local_address, self.packet))
+        await asyncio.sleep(0.01)
+        self.a._received(self.b.local_address, Packet(kind=M.ACK, sender='khoa', recipient='hai',
+            stream_id='chat', session_id='a'*32, ack=1, recv_limit=100))
+        self.assertEqual(self.a._tx[(self.b.local_address, 'chat')].limit, 0)
+        self.assertFalse(send.done())
+        with self.assertRaises(TimeoutError):
+            await send

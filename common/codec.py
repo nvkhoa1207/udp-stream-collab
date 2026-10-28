@@ -123,8 +123,7 @@ def _validate_packet_fields(packet: Packet) -> None:
 
 
 def encode_packet(packet: Packet) -> bytes:
-    # TODO[A1]: JSON UTF-8; kind.value; payload base64; validate field/size.
-        # Đo số byte thực tế theo docs/01_PROTOCOL.md; bản đầu không có envelope mật mã.
+    # Measure the complete UTF-8 JSON body, including base64 and headers.
     if not isinstance(packet, Packet):
         raise TypeError("Đầu vào phải là Packet")
 
@@ -188,9 +187,7 @@ def _reject_json_constant(value: str) -> None:
 
 
 def decode_packet(data: bytes) -> Packet:
-    # TODO[A1]: giới hạn input, parse JSON, strict type/version/length/range.
-    # Base64 sai, kind lạ, số âm, packet quá lớn -> ValueError.
-    # recv_limit bắt buộc trên ACK/WINDOW_UPDATE; bool không phải số nguyên hợp lệ.
+    # Strict wire validation runs before any socket/session/application state changes.
     if not isinstance(data, bytes):
         raise TypeError("Dữ liệu nhận phải là bytes")
 
@@ -270,7 +267,7 @@ def decode_packet(data: bytes) -> Packet:
 
 
 def encode_tcp_record(record: dict) -> bytes:
-    # TODO[A1]: 4 byte big-endian length + JSON, kiểm tra MAX_TCP_RECORD_BYTES.
+    # Length is the encoded byte length, never a Unicode character count.
     if not isinstance(record, dict):
         raise TypeError("Record TCP phải là dictionary")
 

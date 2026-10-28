@@ -58,7 +58,7 @@ def make_handler(runtime, loop, token):
                         self.reply(403, {'error': 'Host không hợp lệ'})
                         return
                     name = {'/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css'}[url.path]
-                    data = (Path(__file__).parent / name).read_text().replace('{{TOKEN}}', token).encode()
+                    data = (Path(__file__).parent / name).read_text(encoding='utf-8').replace('{{TOKEN}}', token).encode('utf-8')
                     self.reply(200, data, {'/': 'text/html; charset=utf-8', '/app.js': 'text/javascript', '/style.css': 'text/css'}[url.path])
                 elif url.path == '/api/events' and self.allowed():
                     after = int(parse_qs(url.query).get('after', ['0'])[0])
@@ -126,10 +126,14 @@ def make_handler(runtime, loop, token):
 
 def run_bridge(port=8000, directory=Path('data/received')):
     loop = asyncio.new_event_loop()
+    runtime = ClientRuntime(directory)
+    try:
+        server = HTTPServer(('127.0.0.1', port), make_handler(runtime, loop, secrets.token_hex(32)))
+    except BaseException:
+        loop.close()
+        raise
     thread = threading.Thread(target=loop.run_forever, daemon=True)
     thread.start()
-    runtime = ClientRuntime(directory)
-    server = HTTPServer(('127.0.0.1', port), make_handler(runtime, loop, secrets.token_hex(32)))
     print(f'Mở http://127.0.0.1:{server.server_port} — file nhận: {Path(directory).resolve()}')
     try:
         server.serve_forever()

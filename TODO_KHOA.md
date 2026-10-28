@@ -1,3 +1,9 @@
+# Bản ghép ngày 29/10/2026
+
+K1–K6 đã ghép server/transport thật trên hai/server-transport. K7 có bằng chứng
+loopback, HTTP và browser; LAN/netem chưa chạy. K8 giữ báo cáo Khoa nguyên bản,
+bổ sung báo cáo Hải để ghép. Các mục phía dưới ghi kế hoạch/bàn giao trước khi ghép.
+
 # Khoa — client, file và giao diện
 
 Owner: `client/`, `ui/`; phối hợp kiểm tra an toàn đầu vào/file/phiên.
@@ -32,7 +38,7 @@ Mở `scripts/demo_mock.py` trước: đây là cách làm song song mà chưa c
 Code thuộc client/ui đã có; không coi toàn BTL hoàn tất khi server/transport
 còn stub. Tham chiếu báo cáo và docs/06_TIEN_DO.md để phân biệt mock với mạng thật.
 
-## Thứ tự bắt đầu
+## Thứ tự bắt đầu (lịch sử)
 
 1. Chạy `python -m scripts.demo_mock` và đọc `common/contracts.py`.
 2. Dùng `ClientService(transport, server_peer, username)`, hoàn thiện vòng nhận

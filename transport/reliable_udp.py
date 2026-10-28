@@ -16,6 +16,7 @@ class _ReceiveStream:
     consumed: int = 0
     queued: int = 0
     packets: dict = field(default_factory=dict)
+    advertised: bool = False
 
 
 @dataclass
@@ -56,6 +57,7 @@ class ReliableUdpTransport:
         self._socket = None
         self._lost = asyncio.Event()
         self._closed = False
+        self._close_task = None
         self._peers = {}
         self._incoming = asyncio.Queue(maxsize=1024)
         self.rejected = 0
@@ -65,6 +67,8 @@ class ReliableUdpTransport:
         self._tx = {}
         self._rx = {}
         self._pending = {}
+        self._inflight = set()
+        self._send_completion = set()
         self._tombstones = {}
         self._draining = {}
         self.probe_seconds = probe_seconds
@@ -82,6 +86,8 @@ class ReliableUdpTransport:
         self._delivery_changed.set()
 
     def register_peer(self, peer, session_id):
+        if self._closed:
+            raise ConnectionError('Transport closed')
         host, port = peer
         if str(ip_address(host)) != host or type(port) is not int or not 1 <= port <= 65535:
             raise ValueError('Invalid peer endpoint')
@@ -151,7 +157,10 @@ class ReliableUdpTransport:
         self._tombstones[key] = (rx.consumed if rx else 0, success)
 
     def _can_reserve(self, peer, stream_id):
-        history = {k[1] for k in (*self._tombstones, *self._rx, *self._tx) if k[0] == peer}
+        if stream_id == 'control' or stream_id.startswith('chat-'):
+            return True
+        history = {k[1] for k in (*self._tombstones, *self._rx, *self._tx)
+                   if k[0] == peer and k[1] != 'control' and not k[1].startswith('chat-')}
         return stream_id in history or len(history) < 4096
 
     def _control(self, peer, packet, kind, **kwargs):
@@ -189,7 +198,8 @@ class ReliableUdpTransport:
             return
         key = (peer, packet.stream_id)
         if packet.kind == M.ACK:
-            future = self._pending.get((*key, packet.ack))
+            ack_key = (*key, packet.ack)
+            future = self._pending.get(ack_key) if ack_key in self._inflight else None
             if future is not None and not future.done():
                 state = self._tx[key]
                 state.limit = max(state.limit, packet.recv_limit)
@@ -213,10 +223,12 @@ class ReliableUdpTransport:
         if packet.kind == M.WINDOW_PROBE:
             if state is None and len(self._rx) < self.max_streams and self._can_reserve(*key):
                 state = self._rx[key] = _ReceiveStream()
+            if state is not None:
+                state.advertised = True
             self._control(peer, packet, M.WINDOW_UPDATE,
                 recv_limit=state.consumed + RECEIVE_WINDOW_PACKETS if state else 0)
             return
-        if state is None:
+        if state is None or not state.advertised:
             return
         if packet.seq <= state.consumed or packet.seq in state.packets:
             self._control(peer, packet, M.ACK, ack=packet.seq, recv_limit=state.consumed + RECEIVE_WINDOW_PACKETS)
@@ -248,10 +260,10 @@ class ReliableUdpTransport:
                 self._queue_ready(key, state)
 
     async def send(self, peer, packet):
-        if peer not in self._peers:
-            raise ValueError('Peer not registered')
         if self._closed:
             raise ConnectionError('Transport closed')
+        if peer not in self._peers:
+            raise ValueError('Peer not registered')
         packet = replace(packet, session_id=self._peers[peer])
         if packet.kind in (M.BIND, M.BIND_OK, M.HEARTBEAT):
             self._write(peer, packet)
@@ -267,17 +279,21 @@ class ReliableUdpTransport:
             raise ValueError('Session stream history quota reached; reconnect')
         if key not in self._tx and len(self._tx) >= 512:
             raise ValueError('Send stream quota reached')
-        state = self._tx.setdefault(key, _SendStream())
-        if state.error is not None:
+        state = self._tx.get(key)
+        if state is not None and state.error is not None:
             raise state.error
         if len(self._pending) >= 1024:
             raise ValueError('Pending send quota reached')
         # Validate before reserving a sequence: malformed application packets cannot leave a hole.
-        encode_packet(replace(packet, seq=state.sequence + 1))
+        encode_packet(replace(packet, seq=state.sequence + 1 if state else 1))
+        if state is None:
+            state = self._tx[key] = _SendStream()
         state.sequence += 1
         packet = replace(packet, seq=state.sequence)
         pending_key = (*key, packet.seq)
         future = asyncio.get_running_loop().create_future()
+        completion = asyncio.get_running_loop().create_future()
+        self._send_completion.add(completion)
         self._pending[pending_key] = future
         cc = self._congestion[peer]
         wake = self._congestion_changed[peer]
@@ -316,11 +332,24 @@ class ReliableUdpTransport:
             ticket = cc.on_sent(size)
             reserved = True
             sent_at = loop.time()
+            if state.error is not None:
+                raise state.error
+            self._inflight.add(pending_key)
             for attempt in range(self.max_retries + 1):
                 if attempt:
-                    delay = max(0, cc.next_send - loop.time())
-                    if delay:
-                        await asyncio.sleep(delay)
+                    while loop.time() < cc.next_send and not future.done():
+                        try:
+                            await asyncio.wait_for(asyncio.shield(future), cc.next_send - loop.time())
+                        except TimeoutError:
+                            pass
+                    if future.done():
+                        result = future.result()
+                        if result is not None:
+                            raise result
+                        cc.on_ack(size, 0)
+                        reserved = False
+                        wake.set()
+                        return
                     cc.next_send = loop.time() + max(0.0001, cc.rtt * size / cc.cwnd)
                 self._write(peer, packet)
                 try:
@@ -345,8 +374,12 @@ class ReliableUdpTransport:
                 cc.discard(size)
                 wake.set()
             self._pending.pop(pending_key, None)
+            self._inflight.discard(pending_key)
             if key in self._draining:
                 self.finish_stream(*key, success=self._draining[key])
+            if not completion.done():
+                completion.set_result(None)
+            self._send_completion.discard(completion)
 
     async def receive(self):
         while True:
@@ -381,20 +414,28 @@ class ReliableUdpTransport:
             await self._delivery_changed.wait()
 
     async def close(self):
-        if self._closed:
-            return
-        self._closed = True
+        if self._close_task is None:
+            self._closed = True
+            self._close_task = asyncio.create_task(self._close())
+        await asyncio.shield(self._close_task)
+
+    async def _close(self):
         for key in self._tx:
             self._fail_stream(key, ConnectionError('Transport closed'))
         if self._socket is not None:
             self._socket.close()
             await self._lost.wait()
             self._socket = None
+        for wake in self._congestion_changed.values():
+            wake.set()
+        if self._send_completion:
+            await asyncio.gather(*(asyncio.shield(done) for done in tuple(self._send_completion)))
         self._peers.clear()
         self._rx.clear()
         self._tx.clear()
         self._tombstones.clear()
         self._draining.clear()
+        self._inflight.clear()
         self._ready_blocked.clear()
         self._congestion.clear()
         for wake in self._congestion_changed.values():

@@ -2,8 +2,8 @@
 
 Owner: `server/`, `transport/`; điều phối `common/` sau khi hai người đồng ý.
 API chung ở `docs/02_API.md`, phạm vi theo README. Bản đầu chưa mã hóa;
-CUBIC giản lược và bridge localhost + polling đã được chọn. Các mục dưới đây
-vẫn chưa hoàn thành trên mạng thật; cập nhật ngày 23/10/2026.
+CUBIC giản lược và bridge localhost + polling đã được chọn. Bản tích hợp ngày 29/10/2026 đã có A1–A8 và kiểm thử loopback thật;
+LAN hai máy/Docker Engine và ghép PDF cuối còn cần người vận hành.
 
 | ID | Ngày | Việc cần code / file | Xong khi |
 |---|---|---|---|
@@ -18,25 +18,25 @@ vẫn chưa hoàn thành trên mạng thật; cập nhật ngày 23/10/2026.
 
 ## Checklist không bỏ sót
 
-- [ ] Dùng `Transport` chung, không viết transport riêng cho server và client.
-- [ ] Số thứ tự theo phiên/chặng/stream, tránh một hàng đợi chặn toàn bộ luồng.
-- [ ] ACK xác nhận đã nhận/giữ dữ liệu an toàn; không ACK dữ liệu bị loại vì buffer đầy.
-- [ ] Gửi lại chỉ phần thiếu; ACK thất lạc vẫn có thể khôi phục; gói trùng được ACK lại.
-- [ ] Cửa sổ đang bay chịu cả giới hạn bên nhận và giới hạn congestion.
-- [ ] Việc đợi ACK của một đích không khóa vòng nhận hay chat của đích khác.
-- [ ] Server dùng danh tính trong session đã xác thực, không tin `sender` tự khai.
-- [ ] BIND kiểm tra phiên AUTH đang chờ, IP nguồn và endpoint; không tự đổi endpoint.
-- [ ] `register_peer(peer, session_id)` không yêu cầu khóa; không gọi cipher stub.
-- [ ] ACK/UPDATE mang recv_limit theo packet; giới hạn tăng dần, không cộng credit từ ACK trùng.
-- [ ] Stream mới xin window bằng probe; mất UPDATE mở cửa sổ vẫn hỏi lại được, có timeout.
-- [ ] Dành buffer trước khi cấp credit; tuân giới hạn tổng stream/bộ nhớ.
-- [ ] ACTIVE/DRAINING → CLOSED trả slot buffer; dấu CLOSED tách riêng, cache
+- [x] Dùng `Transport` chung, không viết transport riêng cho server và client.
+- [x] Số thứ tự theo phiên/chặng/stream, tránh một hàng đợi chặn toàn bộ luồng.
+- [x] ACK xác nhận đã nhận/giữ dữ liệu an toàn; không ACK dữ liệu bị loại vì buffer đầy.
+- [x] Gửi lại chỉ phần thiếu; ACK thất lạc vẫn có thể khôi phục; gói trùng được ACK lại.
+- [x] Cửa sổ đang bay chịu cả giới hạn bên nhận và giới hạn congestion.
+- [x] Việc đợi ACK của một đích không khóa vòng nhận hay chat của đích khác.
+- [x] Server dùng danh tính trong session đã xác thực, không tin `sender` tự khai.
+- [x] BIND kiểm tra phiên AUTH đang chờ, IP nguồn và endpoint; không tự đổi endpoint.
+- [x] `register_peer(peer, session_id)` không yêu cầu khóa; không gọi cipher stub.
+- [x] ACK/UPDATE mang recv_limit theo packet; giới hạn tăng dần, không cộng credit từ ACK trùng.
+- [x] Stream mới xin window bằng probe; mất UPDATE mở cửa sổ vẫn hỏi lại được, có timeout.
+- [x] Dành buffer trước khi cấp credit; tuân giới hạn tổng stream/bộ nhớ.
+- [x] ACTIVE/DRAINING → CLOSED trả slot buffer; dấu CLOSED tách riêng, cache
       kết quả 120s, giữ ID đến hết phiên (quota 4096); thử >128 file nối tiếp.
-- [ ] ACK client gửi tới server chỉ là chặng đầu; báo lỗi nếu chuyển tiếp tới đích thất bại.
-- [ ] Phối hợp Khoa: băm mật khẩu lưu trữ, kiểm tra session/đầu vào và giới hạn tài nguyên.
-- [ ] Ghi rõ TCP AUTH và UDP chưa được bảo vệ bằng mật mã; không nhận là chống nghe lén/giả mạo chủ động.
-- [ ] Timer retry, timeout, buffer, task, session đều được dọn khi đóng/mất kết nối.
-- [ ] Không ghi mật khẩu/khóa vào log; chỉ tài khoản demo được tạo cục bộ.
+- [x] ACK client gửi tới server chỉ là chặng đầu; báo lỗi nếu chuyển tiếp tới đích thất bại.
+- [x] Phối hợp Khoa: băm mật khẩu lưu trữ, kiểm tra session/đầu vào và giới hạn tài nguyên.
+- [x] Ghi rõ TCP AUTH và UDP chưa được bảo vệ bằng mật mã; không nhận là chống nghe lén/giả mạo chủ động.
+- [x] Timer retry, timeout, buffer, task, session đều được dọn khi đóng/mất kết nối.
+- [x] Không ghi mật khẩu/khóa vào log; chỉ tài khoản demo được tạo cục bộ.
 
 ## Đầu vào từ Khoa
 
@@ -44,3 +44,8 @@ Client handshake đúng schema AUTH_OK(session_id, udp_port), metadata/file
 completion theo protocol, FILE_ACCEPT do chương trình tự gửi. Không phụ thuộc
 PayloadCipher trong bản đầu. Có thể thử router trước bằng MemoryTransport và
 tài khoản fixture; vẫn phải kiểm thử mạng thật khi ghép.
+
+## Bằng chứng hiện tại
+
+Xem reports/HAI_REPORT.md, docs/04_ACCEPTANCE.md và mục đầu docs/06_TIEN_DO.md.
+Các checklist trên xác nhận code/loopback; không xác nhận LAN, netem hoặc PDF nhóm.

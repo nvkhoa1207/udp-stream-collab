@@ -1,4 +1,4 @@
-"""Hợp đồng dữ liệu theo docs/01_PROTOCOL.md; codec/UDP vẫn đang triển khai."""
+"""Immutable protocol-v1 data shared by the client, server and UDP transport."""
 
 from dataclasses import dataclass, field
 from enum import Enum

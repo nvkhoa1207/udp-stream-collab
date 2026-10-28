@@ -1,6 +1,6 @@
 # Thiết kế tổng thể BTL UDP Stream Collab
 
-Cập nhật 23/10/2026 theo [README](../README.md). Tài liệu mô tả đích triển khai;
+Cập nhật 29/10/2026 theo [README](../README.md). Tài liệu mô tả đích triển khai;
 trạng thái code/kiểm tra ở [tiến độ](06_TIEN_DO.md). Thay thế các đề xuất cũ về
 TLS/HMAC bắt buộc, nhận file thủ công, MSG_DELIVERED và Transport.release().
 Các phần này không phải điều kiện của bản đầu.
@@ -27,8 +27,8 @@ flowchart LR
 
 Server và client Khoa là hai tiến trình trên cùng máy. Cả hai client trỏ IP LAN
 máy Khoa. Server bind LAN hoặc `0.0.0.0` khi thử hai máy; bridge mỗi máy chỉ nghe
-`127.0.0.1`. Thử nhiều client trên một máy thì cổng HTTP khác nhau. Chưa có lệnh
-chạy mạng hoàn chỉnh; không cần máy thứ ba hoặc đổi kiến trúc.
+`127.0.0.1`. Thử nhiều client trên một máy thì cổng HTTP khác nhau. Đã có lệnh
+chạy mạng trong README; LAN hai máy chưa nghiệm thu; không cần máy thứ ba hoặc đổi kiến trúc.
 
 ## 2. Công nghệ, module và phân công
 
@@ -104,7 +104,7 @@ transfer/tệp tạm và báo đúng trạng thái, không tạo thành công gi
   giảm loss/timeout, không đếm ACK trùng. Flow tính packet, congestion tính byte;
   cả hai cùng chặn DATA mới. Cần đo kết quả, fixed window không phải CUBIC.
 
-Hiện chỉ model/enum/config và hợp đồng đã cập nhật; UDP/flow/CUBIC vẫn TODO.
+UDP/flow/CUBIC đã triển khai; xem reports/HAI_REPORT.md và kết quả loopback thật.
 
 ## 5. Đồng thời, backpressure và UI
 
@@ -121,7 +121,7 @@ hoặc báo lỗi rõ, không ACK thành công giả.
 HTTP bridge dùng thread hoặc cơ chế riêng phối hợp event loop; không sửa state
 mạng đồng thời thiếu kiểm soát. Polling từ UI lấy event, giới hạn request đang
 chờ. Login, online, chat, file picker/progress và lỗi là đủ cho bản đầu.
-Xem [UI](../ui/README.md) để ghép endpoint; fixture hiện tại vẫn chưa nối core.
+Xem [UI](../ui/README.md) để ghép endpoint; HTTP/UI đã nối core thật và đã thử bằng browser.
 
 ## 6. Bảo mật đúng phạm vi
 
@@ -148,3 +148,17 @@ bắt buộc chỉ vì từng nằm trong bản thiết kế trước.
 Các kịch bản ở [nghiệm thu](04_ACCEPTANCE.md). Không suy từ mock ra đã hoàn thành
 mạng/bảo mật; không tick mục chưa có bằng chứng. Hướng dẫn Git ở
 [quy trình ghép](03_GIT_WORKFLOW.md), tiến độ/lịch sử ở [nhật ký](06_TIEN_DO.md).
+
+## 8. Bản ghép hiện tại
+
+Nhánh hai/server-transport đã merge Khoa 2999d08 và giữ codec/TCP/auth A1–A3.
+Server chạy UDP/router song song TCP. Callback datagram kiểm tra session/endpoint/
+sender trước ACK; router dùng identity từ session, giữ message_id, transport
+gán session/seq theo chặng. Chat ra dùng ánh xạ sender+stream để tránh trùng seq.
+Queue đích đầy giữ credit ở stream tương ứng; file I/O/hash ở thread hữu hạn.
+CUBIC byte budget chung peer, flow credit riêng stream. Offline dọn session,
+worker, buffers và báo CANCEL/ERROR các bên. Các quota/API ở protocol mục 9.
+
+Bằng chứng: 20 client loopback, file tới 16 MiB, 140 file nối tiếp, loss 7% có seed,
+HTTP hai bridge và thao tác browser. LAN/Docker chưa chạy, PDF nhóm cần ghép từ
+báo cáo Hải/Khoa; không quy đổi kết quả mock thành kết quả mạng.
