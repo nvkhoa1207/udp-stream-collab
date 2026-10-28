@@ -260,3 +260,7 @@ bằng chứng UI chat/file qua mạng thật vì phụ thuộc Hải.
 ## Hải — tích hợp A3 ngày 28/10/2026
 Merge origin/codex/align-protocol-docs 2999d08 vào hai/server-transport. Client/server dùng chung strict TCP reader và giới hạn password 1–128 ký tự. Server quét phiên định kỳ và dọn khi close. Regression: 170 tests, 169 pass, 1 optional network test skipped; test_team_auth dùng TCP thật với server nhóm. Sandbox Windows kẹt socketpair nên test chạy ngoài sandbox.
 
+
+## Hải — giai đoạn 2
+UDP endpoint hữu hạn, bootstrap BIND/BIND_OK, kiểm tra session/sender/IP/endpoint trước online, idempotent cùng endpoint. Test UDP loopback mất reply, lặp, sai endpoint/identity, expired và malformed: regression 172 tests, 171 pass, 1 skip. Chưa có reliable DATA ở mốc này.
+

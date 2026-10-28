@@ -7,6 +7,8 @@ from common.codec import encode_tcp_record, read_tcp_record
 from common.config import TCP_PORT, UDP_PORT
 from server.auth import AuthService
 from server.sessions import SessionRegistry
+from common.models import MessageType, Packet
+from transport.reliable_udp import ReliableUdpTransport
 
 
 logger = logging.getLogger(__name__)
@@ -23,6 +25,7 @@ class ServerApp:
         auth: AuthService | None = None,
         sessions: SessionRegistry | None = None,
         udp_port: int = UDP_PORT,
+        enable_udp: bool = False,
     ) -> None:
         if type(tcp_port) is not int or not 0 <= tcp_port <= 65535:
             raise ValueError("Cổng TCP không hợp lệ")
@@ -30,12 +33,15 @@ class ServerApp:
         if handshake_timeout <= 0 or max_clients <= 0:
             raise ValueError("Timeout và giới hạn client phải dương")
 
-        if type(udp_port) is not int or not 1 <= udp_port <= 65535:
+        if type(udp_port) is not int or not 0 <= udp_port <= 65535:
             raise ValueError("Cổng UDP không hợp lệ")
 
         self.auth = auth if auth is not None else AuthService()
         self.sessions = sessions if sessions is not None else SessionRegistry()
         self.udp_port = udp_port
+        self.transport = (ReliableUdpTransport((host, udp_port),
+                          bootstrap=self._bind, authorize=self._authorize)
+                          if enable_udp else None)
 
         self.host = host
         self.tcp_port = tcp_port
@@ -59,6 +65,9 @@ class ServerApp:
         if self._server is not None:
             raise RuntimeError("Server đã được khởi động")
 
+        if self.transport is not None:
+            await self.transport.start()
+            self.udp_port = self.transport.local_address[1]
         self._server = await asyncio.start_server(
             self._accept_client,
             self.host,
@@ -241,12 +250,34 @@ class ServerApp:
 
         self._tasks.clear()
         self._writers.clear()
+        if self.transport is not None:
+            await self.transport.close()
         self.sessions.clear()
 
     async def _maintenance(self) -> None:
         while True:
             await asyncio.sleep(0.1)
-            self.sessions.sweep()
+            for session in self.sessions.sweep():
+                if self.transport is not None and session.peer is not None:
+                    self.transport.remove_peer(session.peer)
+
+    def _bind(self, peer, packet):
+        session = self.sessions.get(packet.session_id)
+        if (packet.sender != session.username or packet.recipient != 'server'
+                or packet.stream_id != 'control'):
+            raise ValueError('Invalid BIND identity')
+        self.sessions.bind_peer(packet.session_id, peer)
+        self.transport.register_peer(peer, packet.session_id)
+        self.transport._write(peer, Packet(kind=MessageType.BIND_OK,
+            sender='server', recipient=session.username, stream_id='control',
+            session_id=packet.session_id))
+
+    def _authorize(self, peer, packet):
+        session = self.sessions.get(packet.session_id)
+        if session.peer != peer or session.username != packet.sender:
+            return False
+        self.sessions.touch(packet.session_id)
+        return True
 
     async def run(self) -> None:
         await self.start()
