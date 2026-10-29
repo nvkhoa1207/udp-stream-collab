@@ -39,6 +39,10 @@ function showError(error) {
 
 function updateConnection(value) {
   connected = value;
+  // Khi mất phiên, danh sách cũ không còn là trạng thái online hiện tại.
+  if (!connected) {
+    updateUsers([]);
+  }
   const status = getElement('connection');
   if (connected) {
     status.textContent = username ? 'Connected as ' + username : 'Connected';
