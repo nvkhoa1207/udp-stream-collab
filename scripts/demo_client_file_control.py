@@ -64,7 +64,7 @@ async def main(receiver_cancel=False):
             assert update["status"] == "verifying" and update["acknowledged_bytes"] == 5120
             assert not sending.done()
             show(update)
-            print("Đã chuyển 100% tới server giả; vẫn chờ COMPLETE.")
+            print("All bytes reached the mock server; still waiting for COMPLETE.")
             release_complete.set()
             await sending
             show(khoa.poll_file_updates()[0])
@@ -81,7 +81,7 @@ async def main(receiver_cancel=False):
                     await asyncio.sleep(0.01)
             show(update)
             if receiver_cancel:
-                print("Hải chủ động hủy lượt nhận.")
+                print("Hai cancelled the incoming transfer.")
                 assert await hai.cancel_receive_file(update["transfer_id"])
             else:
                 await khoa.cancel_file(update["transfer_id"])
@@ -90,7 +90,7 @@ async def main(receiver_cancel=False):
             except FileTransferCancelled:
                 pass
             else:
-                raise AssertionError("Lượt hủy không được báo thành công")
+                raise AssertionError("A cancelled transfer must not be reported as successful")
             if not receiver_cancel:
                 await asyncio.wait_for(cancelled.wait(), timeout=3)
             show(khoa.poll_file_updates()[0])
@@ -98,8 +98,8 @@ async def main(receiver_cancel=False):
             assert receiver.reserved_bytes == 0
             files = list(receiver.output_directory.iterdir())
             assert len(files) == 1 and files[0].read_bytes() == source.read_bytes()
-            print("Bên nhận đã dọn .part và trả quota; file hoàn tất trước đó vẫn còn.")
-            print("Demo dùng mock, không có ACK/UDP thật. Thư mục thử được tự dọn.")
+            print("Receiver removed the .part file and released quota; the completed file is preserved.")
+            print("Mock demo without real ACK/UDP. Test folders are cleaned automatically.")
         finally:
             for task in tasks:
                 task.cancel()
@@ -109,6 +109,6 @@ async def main(receiver_cancel=False):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description='Mock demo of file completion and cancellation.')
     parser.add_argument("--receiver-cancel", action="store_true")
     asyncio.run(main(parser.parse_args().receiver_cancel))

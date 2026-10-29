@@ -1,8 +1,8 @@
-"""Simplified CUBIC, byte budget shared by all streams of one peer/direction.
+"""CUBIC rút gọn: các luồng gửi đến cùng một máy dùng chung cửa sổ byte.
 
-Uses RFC 9438's cubic target (C=.4, beta=.7), ACK-clocked growth, a small
-Reno growth floor, bounded cwnd and one decrease per recovery flight.
-No HyStart++, ECN, fast convergence or spurious-loss undo. Loss uses RTO.
+Dùng công thức CUBIC với C=0.4, beta=0.7; chỉ tăng cửa sổ khi nhận ACK.
+Giảm cửa sổ một lần cho mỗi đợt mất gói, phát hiện mất gói bằng timeout.
+Chưa làm HyStart++, ECN, fast convergence hay khôi phục sau báo mất gói nhầm.
 """
 import time
 
@@ -33,8 +33,9 @@ class CongestionController:
             raise ValueError('Congestion budget exceeded')
         self.bytes_in_flight += size
         self.sent += 1
-        # One packet per pacing slot; no accumulated unlimited idle burst.
-        self.next_send = max(self.next_send, self.clock()) + max(0.0001, self.rtt * size / self.cwnd)
+        # Giãn thời gian gửi để không dồn nhiều gói sau một lúc rảnh.
+        spacing = max(0.0001, self.rtt * size / self.cwnd)
+        self.next_send = max(self.next_send, self.clock()) + spacing
         return self.sent
 
     def on_ack(self, acknowledged_bytes, rtt_seconds):
@@ -45,13 +46,18 @@ class CongestionController:
         if rtt_seconds > 0:
             self.rtt = 0.875 * self.rtt + 0.125 * rtt_seconds
         elapsed = max(0.0, self.clock() - self.epoch)
-        target = (0.4 * (elapsed + self.rtt - self.k) ** 3 + self.w_max / self.mss) * self.mss
+        # Tính mức cửa sổ mà đường cong CUBIC hướng tới.
+        target = (
+            0.4 * (elapsed + self.rtt - self.k) ** 3 + self.w_max / self.mss
+        ) * self.mss
         reno = self.mss * acknowledged_bytes / self.cwnd
         cubic = max(0.0, target - self.cwnd) * acknowledged_bytes / self.cwnd
-        self.cwnd = min(self.maximum, self.cwnd + min(self.mss, max(reno, cubic)))
+        # Mỗi ACK tăng tối đa một gói; Reno giúp cửa sổ không tăng quá chậm.
+        increase = min(self.mss, max(reno, cubic))
+        self.cwnd = min(self.maximum, self.cwnd + increase)
 
     def on_loss(self, lost_bytes, *, ticket=None):
-        # Bytes remain in flight during retries; a retransmit does not reserve again.
+        # Gửi lại vẫn dùng số byte đã giữ chỗ, không cộng thêm lần nữa.
         ticket = self.sent if ticket is None else ticket
         if lost_bytes <= 0 or ticket <= self.recovery_until:
             return

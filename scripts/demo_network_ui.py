@@ -1,7 +1,7 @@
-"""Local browser fixture: real server and two real HTTP/UDP clients.
+"""Mở server và hai client thật để thử giao diện trên localhost.
 
-Test accounts hai/khoa use the explicit non-secret fixture 'test-password'.
-Never use this fixture on an untrusted network. Production uses server.main.
+Tài khoản thử hai/khoa dùng mật khẩu mẫu 'test-password'.
+Chỉ chạy trong môi trường thử; chạy bình thường bằng server.main.
 """
 import argparse
 import asyncio
@@ -59,7 +59,7 @@ async def run(seconds, slow_file_seconds=0):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description='Local browser test: real server and two clients, using test-password.')
     parser.add_argument('--seconds', type=int, default=600)
     parser.add_argument('--slow-file-seconds', type=float, default=0)
     args = parser.parse_args()

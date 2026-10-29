@@ -1,7 +1,7 @@
-"""Reproducible loopback acceptance against the real team server and clients.
+"""Kiểm tra server và client thật qua địa chỉ loopback.
 
-All files/accounts are test fixtures, only in a TemporaryDirectory. Faults wrap
-socket writes, so delivered packets still cross real UDP sockets (not netem).
+File và tài khoản chỉ dùng cho bài thử, thư mục tạm được dọn sau khi chạy.
+Lỗi mạng được chèn lúc gửi; gói không bị bỏ vẫn đi qua socket UDP thật.
 """
 import argparse
 import asyncio
@@ -150,7 +150,7 @@ async def run(args):
             for size in args.sizes:
                 await transfer(size, f'file-{size}.bin')
             for i in range(args.streams):
-                # Empty files still use META/ACCEPT/END/COMPLETE and both UDP legs.
+                # File rỗng vẫn dùng META/ACCEPT/END/COMPLETE qua cả hai chặng UDP.
                 await transfer(0, f'sequential-{i}.bin', verbose=False)
                 if (i+1) % 128 == 0 or i+1 == args.streams:
                     print(json.dumps(dict(stage='sequential-files', completed=i+1)), flush=True)
@@ -203,7 +203,7 @@ async def run(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description='Test real clients on loopback with optional packet loss and delay.')
     parser.add_argument('--clients', type=int, default=20)
     parser.add_argument('--streams', type=int, default=0)
     parser.add_argument('--sizes', type=lambda s: [int(v) for v in s.split(',')], default=[1024, 1048576])

@@ -1,4 +1,4 @@
-"""Bridge sở hữu một event loop và một phiên client, không chạy I/O HTTP trong loop."""
+"""Nối các lệnh từ giao diện với một phiên client chạy bằng asyncio."""
 import asyncio
 from collections import deque
 from pathlib import Path
@@ -19,8 +19,12 @@ class ClientRuntime:
         self.pump = None
 
     def make_client(self, host, port, username):
-        return ClientService(ReliableUdpTransport(('0.0.0.0', 0)), (host, 9001), username,
-                             tcp_peer=(host, port), file_receiver=FileReceiver(self.directory))
+        transport = ReliableUdpTransport(('0.0.0.0', 0))
+        receiver = FileReceiver(self.directory)
+        return ClientService(
+            transport, (host, 9001), username,
+            tcp_peer=(host, port), file_receiver=receiver,
+        )
 
     def emit(self, event):
         self.sequence += 1
@@ -37,22 +41,21 @@ class ClientRuntime:
                 self.emit(event)
             await asyncio.sleep(0.1)
             if client.session_id is None:
-                self.emit(dict(type='error', message='Phiên đã dừng; hãy đăng xuất rồi đăng nhập lại.'))
+                self.emit(dict(type='error', message='Session ended; log out and log in again.'))
                 return
 
     async def login(self, body):
         if self.client is not None:
-            raise ValueError('Hãy đăng xuất phiên hiện tại trước')
+            raise ValueError('Log out of the current session first')
         host, port, username = body['host'], body['port'], body['username']
-        if type(host) is not str or not host or len(host) > 253 or type(port) is not int or not 1 <= port <= 65535:
-            raise ValueError('Server không hợp lệ')
-        # FileReceiver construction may create a directory on a slow filesystem.
-        # Construct outside the core loop; asyncio primitives bind lazily at login.
+        if (
+            type(host) is not str or not host or len(host) > 253
+            or type(port) is not int or not 1 <= port <= 65535
+        ):
+            raise ValueError('Invalid server address or port')
+        # Tạo thư mục nhận file trong thread để không chặn vòng xử lý mạng.
         client = await asyncio.to_thread(self.factory, host, port, username)
-        try:
-            await client.login(body['password'])
-        except BaseException:
-            raise
+        await client.login(body['password'])
         self.client = client
         self.emit(dict(type='connection', connected=True, username=username))
         self.pump = asyncio.create_task(self.collect())
@@ -63,19 +66,22 @@ class ClientRuntime:
             awaitable.close()
             if path is not None:
                 path.unlink(missing_ok=True)
-            raise ValueError('Client đang bận, hãy thử lại')
+            raise ValueError('Client is busy; try again')
         async def run():
             try:
                 await awaitable
             except asyncio.CancelledError:
                 raise
             except FileTransferCancelled:
-                pass  # The file snapshot already describes this requested cancellation.
+                pass  # Trạng thái file đã báo hủy, không cần thêm một lỗi chung.
             except Exception as error:
-                self.emit(dict(type='error', message='Thao tác không hoàn tất: ' + type(error).__name__))
+                self.emit(dict(type='error', message='Operation failed: ' + type(error).__name__))
             finally:
                 if path is not None:
-                    await asyncio.to_thread(owner.cleanup) if owner is not None else await asyncio.to_thread(path.unlink, missing_ok=True)
+                    if owner is not None:
+                        await asyncio.to_thread(owner.cleanup)
+                    else:
+                        await asyncio.to_thread(path.unlink, missing_ok=True)
         task = asyncio.create_task(run())
         self.jobs.add(task)
         def done(task):
@@ -92,23 +98,32 @@ class ClientRuntime:
             await self.close()
             return dict(connected=False)
         if self.client is None or self.client.session_id is None:
-            raise ValueError('Chưa kết nối')
+            raise ValueError('Not connected')
         if action == 'messages':
             return self.start_job(self.client.send_chat(body['recipient'], body['text']))
         if action == 'cancel':
-            method = self.client.cancel_receive_file if body['direction'] == 'receive' else self.client.cancel_file
+            if body['direction'] == 'receive':
+                method = self.client.cancel_receive_file
+            else:
+                method = self.client.cancel_file
             return self.start_job(method(body['transfer_id']))
-        raise ValueError('Lệnh không hợp lệ')
+        raise ValueError('Invalid command')
 
     async def upload(self, recipient, path, owner=None):
         if self.client is None or self.client.session_id is None:
-            raise ValueError('Chưa kết nối')
+            raise ValueError('Not connected')
         return self.start_job(self.client.send_file(recipient, path), path, owner)
 
     async def poll(self, after):
-        return dict(events=[e for e in self.events if e['id'] > after], cursor=self.sequence,
-                    reset=bool(self.events and after < self.events[0]['id'] - 1),
-                    connected=self.client is not None and self.client.session_id is not None)
+        new_events = [event for event in self.events if event['id'] > after]
+        history_expired = bool(self.events and after < self.events[0]['id'] - 1)
+        connected = self.client is not None and self.client.session_id is not None
+        return {
+            'events': new_events,
+            'cursor': self.sequence,
+            'reset': history_expired,
+            'connected': connected,
+        }
 
     async def close(self):
         await asyncio.sleep(0)  # Cho job mới vào try/finally trước khi hủy.

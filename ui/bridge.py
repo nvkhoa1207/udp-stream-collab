@@ -1,4 +1,4 @@
-"""HTTP localhost, stdlib, same-origin/token, request và upload hữu hạn."""
+"""Phục vụ giao diện trên localhost và kiểm tra các yêu cầu HTTP."""
 import asyncio
 import json
 import secrets
@@ -11,6 +11,16 @@ from urllib.parse import urlsplit, parse_qs
 from ui.runtime import ClientRuntime
 
 MAX_UPLOAD = 16 * 1024 * 1024
+MAX_JSON_BODY = 8192
+STATIC_FILES = {
+    '/': ('index.html', 'text/html; charset=utf-8'),
+    '/app.js': ('app.js', 'text/javascript'),
+    '/style.css': ('style.css', 'text/css'),
+}
+CSP = (
+    "default-src 'self'; script-src 'self'; style-src 'self'; "
+    "frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+)
 
 
 def make_handler(runtime, loop, token):
@@ -29,7 +39,7 @@ def make_handler(runtime, loop, token):
             self.send_header('Content-Length', str(len(data)))
             self.send_header('Cache-Control', 'no-store')
             self.send_header('X-Content-Type-Options', 'nosniff')
-            self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+            self.send_header('Content-Security-Policy', CSP)
             self.end_headers()
             self.wfile.write(data)
 
@@ -47,34 +57,62 @@ def make_handler(runtime, loop, token):
                 return future.result(timeout=25)
             except FutureTimeout:
                 future.cancel()
-                raise TimeoutError('Client quá hạn')
+                raise TimeoutError('Client operation timed out')
+
+        def serve_static(self, path):
+            host = '127.0.0.1:' + str(self.server.server_port)
+            if self.headers.get('Host') != host:
+                self.reply(403, {'error': 'Invalid host'})
+                return
+            name, content_type = STATIC_FILES[path]
+            source = (Path(__file__).parent / name).read_text(encoding='utf-8')
+            data = source.replace('{{TOKEN}}', token).encode('utf-8')
+            self.reply(200, data, content_type)
+
+        def read_json(self, size):
+            if not 0 <= size <= MAX_JSON_BODY:
+                raise ValueError()
+            if self.headers.get_content_type() != 'application/json':
+                raise ValueError()
+            raw = self.rfile.read(size)
+            if len(raw) != size:
+                raise ValueError()
+            body = json.loads(raw)
+            if type(body) is not dict:
+                raise ValueError()
+            return body
+
+        def read_upload(self, path, size):
+            # Ghi từng phần vào file tạm, không giữ cả file trong RAM.
+            with path.open('xb') as output:
+                remaining = size
+                while remaining:
+                    data = self.rfile.read(min(65536, remaining))
+                    if not data:
+                        raise ConnectionError('Incomplete upload')
+                    output.write(data)
+                    remaining -= len(data)
 
         def do_GET(self):
             try:
                 url = urlsplit(self.path)
-                if url.path in ('/', '/app.js', '/style.css'):
-                    host = '127.0.0.1:' + str(self.server.server_port)
-                    if self.headers.get('Host') != host:
-                        self.reply(403, {'error': 'Host không hợp lệ'})
-                        return
-                    name = {'/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css'}[url.path]
-                    data = (Path(__file__).parent / name).read_text(encoding='utf-8').replace('{{TOKEN}}', token).encode('utf-8')
-                    self.reply(200, data, {'/': 'text/html; charset=utf-8', '/app.js': 'text/javascript', '/style.css': 'text/css'}[url.path])
+                if url.path in STATIC_FILES:
+                    self.serve_static(url.path)
                 elif url.path == '/api/events' and self.allowed():
                     after = int(parse_qs(url.query).get('after', ['0'])[0])
                     if after < 0:
                         raise ValueError()
                     self.reply(200, self.call(runtime.poll(after)))
                 else:
-                    self.reply(403, {'error': 'Không được phép'})
+                    self.reply(403, {'error': 'Access denied'})
             except (ValueError, KeyError):
-                self.reply(400, {'error': 'Yêu cầu không hợp lệ'})
+                self.reply(400, {'error': 'Invalid request'})
 
         def do_POST(self):
             temporary = None
             try:
                 if not self.allowed():
-                    self.reply(403, {'error': 'Origin/token không hợp lệ'})
+                    self.reply(403, {'error': 'Invalid origin or token'})
                     return
                 if self.headers.get('Transfer-Encoding') or len(self.headers.get_all('Content-Length', [])) != 1:
                     raise ValueError()
@@ -82,42 +120,31 @@ def make_handler(runtime, loop, token):
                 url = urlsplit(self.path)
                 if url.path == '/api/files':
                     if not 0 <= size <= MAX_UPLOAD:
-                        raise ValueError('File tối đa 16 MiB')
+                        raise ValueError('Maximum file size is 16 MiB')
                     query = parse_qs(url.query)
                     name, recipient = query['name'][0], query['recipient'][0]
-                    if not name or Path(name).name != name or name in ('.', '..') or '\\' in name or len(name.encode()) > 128:
-                        raise ValueError('Tên file không hợp lệ')
+                    if (
+                        not name or Path(name).name != name or name in ('.', '..')
+                        or '\\' in name or len(name.encode()) > 128
+                    ):
+                        raise ValueError('Invalid file name')
                     temporary = tempfile.TemporaryDirectory(prefix='btl-upload-')
                     path = Path(temporary.name) / name
-                    with path.open('xb') as output:
-                        remaining = size
-                        while remaining:
-                            data = self.rfile.read(min(65536, remaining))
-                            if not data:
-                                raise ConnectionError('Upload thiếu dữ liệu')
-                            output.write(data)
-                            remaining -= len(data)
+                    self.read_upload(path, size)
                     result = self.call(runtime.upload(recipient, path, temporary))
-                    temporary = None  # Background job sở hữu và dọn thư mục upload.
+                    temporary = None  # Tác vụ gửi file sẽ dọn thư mục này khi xong.
                 else:
-                    if not 0 <= size <= 8192 or self.headers.get_content_type() != 'application/json':
-                        raise ValueError()
-                    raw = self.rfile.read(size)
-                    if len(raw) != size:
-                        raise ValueError()
-                    body = json.loads(raw)
-                    if type(body) is not dict:
-                        raise ValueError()
+                    body = self.read_json(size)
                     result = self.call(runtime.command(url.path.removeprefix('/api/'), body))
                 self.reply(200, result)
             except NotImplementedError:
-                self.reply(503, {'error': 'Transport/server của Hải chưa triển khai; chưa thể đăng nhập mạng thật.'})
+                self.reply(503, {'error': 'This operation is not supported by the configured transport or server.'})
             except PermissionError:
-                self.reply(401, {'error': 'Đăng nhập bị từ chối'})
+                self.reply(401, {'error': 'Login was rejected'})
             except (ValueError, KeyError, TypeError, UnicodeError):
-                self.reply(400, {'error': 'Dữ liệu không hợp lệ hoặc client đang bận'})
+                self.reply(400, {'error': 'Invalid data or client is busy'})
             except Exception:
-                self.reply(503, {'error': 'Không hoàn tất thao tác; kiểm tra kết nối và trạng thái client'})
+                self.reply(503, {'error': 'Operation failed; check the connection and client status'})
             finally:
                 if temporary is not None:
                     temporary.cleanup()
@@ -134,7 +161,7 @@ def run_bridge(port=8000, directory=Path('data/received')):
         raise
     thread = threading.Thread(target=loop.run_forever, daemon=True)
     thread.start()
-    print(f'Mở http://127.0.0.1:{server.server_port} — file nhận: {Path(directory).resolve()}')
+    print(f'Open http://127.0.0.1:{server.server_port} — receive folder: {Path(directory).resolve()}')
     try:
         server.serve_forever()
     except KeyboardInterrupt:

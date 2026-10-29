@@ -1,68 +1,405 @@
 'use strict';
-const $ = id => document.getElementById(id);
+
 const token = document.querySelector('meta[name="client-token"]').content;
-let connected = false, busy = false, uploading = false, cursor = 0;
 const fileRows = new Map();
-const terminal = new Set(['completed', 'failed', 'cancelled', 'expired']);
-const labels = {preparing:'Chuẩn bị',waiting_accept:'Chờ chấp nhận',sending:'Đang gửi',receiving:'Đang nhận',verifying:'Chờ kiểm tra',completed:'Hoàn tất',failed:'Lỗi',cancelled:'Đã hủy',expired:'Hết hạn'};
-function state(value) {
+const terminalStatuses = new Set(['completed', 'failed', 'cancelled', 'expired']);
+const statusLabels = {
+  preparing: 'Preparing',
+  waiting_accept: 'Waiting for receiver',
+  sending: 'Sending',
+  receiving: 'Receiving',
+  verifying: 'Verifying SHA-256',
+  completed: 'Completed',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+  expired: 'Expired'
+};
+
+let connected = false;
+let busy = false;
+let uploading = false;
+let cursor = 0;
+let username = '';
+
+function getElement(id) {
+  return document.getElementById(id);
+}
+
+// Dùng textContent để tên file và tin nhắn luôn được hiển thị như văn bản.
+function createElement(tag, className, text = '') {
+  const element = document.createElement(tag);
+  element.className = className;
+  element.textContent = text;
+  return element;
+}
+
+function showError(error) {
+  getElement('error').textContent = error.message || String(error);
+}
+
+function updateConnection(value) {
   connected = value;
-  $('connection').textContent = value ? 'Đã kết nối' : 'Chưa kết nối';
-  for (const id of ['recipient','text','send-chat','file','send-file','logout']) $(id).disabled = !value;
-  $('login-button').disabled = value || busy;
-  $('send-file').disabled = !value || uploading;
+  const status = getElement('connection');
+  if (connected) {
+    status.textContent = username ? 'Connected as ' + username : 'Connected';
+    status.dataset.state = 'online';
+  } else if (busy) {
+    status.textContent = 'Connecting…';
+    status.dataset.state = 'connecting';
+  } else {
+    status.textContent = 'Disconnected';
+    status.dataset.state = 'offline';
+  }
+
+  const controls = ['recipient', 'text', 'send-chat', 'file', 'send-file', 'logout'];
+  for (const id of controls) {
+    getElement(id).disabled = !connected;
+  }
+  getElement('login-button').disabled = connected || busy;
+  getElement('send-file').disabled = !connected || uploading;
+  for (const button of getElement('user-list').querySelectorAll('button')) {
+    button.disabled = !connected;
+  }
+  for (const row of fileRows.values()) {
+    row.button.disabled = row.done || !connected;
+  }
 }
-function error(e) { $('error').textContent = e.message || String(e); }
+
+// Browser chỉ gọi HTTP bridge. Phần Python mới thực hiện gửi TCP/UDP.
 async function api(path, body) {
-  const response = await fetch(path, {method:body === undefined ? 'GET':'POST',headers:{'X-Client-Token':token,...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:JSON.stringify(body)});
-  const value = await response.json();
-  if (!response.ok) throw new Error(value.error || 'Thao tác thất bại');
-  return value;
+  const options = {
+    method: 'GET',
+    headers: {'X-Client-Token': token}
+  };
+  if (body !== undefined) {
+    options.method = 'POST';
+    options.headers['Content-Type'] = 'application/json';
+    options.body = JSON.stringify(body);
+  }
+  const response = await fetch(path, options);
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.error || 'The operation failed.');
+  }
+  return result;
 }
-function message(text) {
-  const item = document.createElement('li'); item.textContent = text;
-  $('messages').append(item);
-  while ($('messages').children.length > 500) $('messages').firstChild.remove();
-  $('messages').scrollTop = $('messages').scrollHeight;
+
+function updateRecipient() {
+  const recipient = getElement('recipient').value;
+  getElement('chat-recipient').textContent = recipient === '*' ? 'To everyone' : 'To ' + recipient;
+  getElement('file-recipient').textContent = recipient === '*'
+    ? 'Choose one recipient to send a file.'
+    : 'File recipient: ' + recipient;
+  for (const button of getElement('user-list').querySelectorAll('button')) {
+    button.setAttribute('aria-pressed', String(button.dataset.username === recipient));
+  }
 }
-function fileUpdate(e) {
-  const key = e.direction + ':' + e.transfer_id;
-  let row = fileRows.get(key);
-  if (!row) {
-    if (fileRows.size >= 100) {
-      const old = [...fileRows.entries()].find(([,v])=>v.done);
-      if (old) { old[1].item.remove(); fileRows.delete(old[0]); }
+
+function updateUsers(users) {
+  const select = getElement('recipient');
+  const selected = select.value;
+  select.replaceChildren();
+  getElement('user-list').replaceChildren();
+  getElement('user-count').textContent = String(users.length);
+
+  for (const name of ['*', ...users]) {
+    const label = name === '*' ? 'Everyone' : name;
+    const option = document.createElement('option');
+    option.value = name;
+    option.textContent = label;
+    select.append(option);
+
+    const item = document.createElement('li');
+    const button = createElement('button', 'user-button', label);
+    button.type = 'button';
+    button.dataset.username = name;
+    button.disabled = !connected;
+    button.onclick = () => {
+      select.value = name;
+      updateRecipient();
+    };
+    item.append(button);
+    getElement('user-list').append(item);
+  }
+
+  // Giữ người đang chọn nếu người đó vẫn còn trong danh sách.
+  if (selected === '*' || users.includes(selected)) {
+    select.value = selected;
+  }
+  updateRecipient();
+}
+
+function appendMessage(item) {
+  const messages = getElement('messages');
+  messages.append(item);
+  // Bỏ tin cũ để trang không giữ quá nhiều phần tử khi chạy lâu.
+  while (messages.children.length > 500) {
+    messages.firstChild.remove();
+  }
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function showMessage(sender, recipient, text, outgoing = false) {
+  const item = createElement('li', outgoing ? 'message message-outgoing' : 'message');
+  const target = recipient === '*' ? 'everyone' : recipient;
+  const kind = recipient === '*' ? 'Broadcast' : 'Private';
+  let details = sender + ' → ' + target + ' · ' + kind;
+  if (outgoing) {
+    details += ' · Send requested';
+  }
+  item.append(createElement('span', 'message-meta', details));
+  item.append(createElement('span', 'message-body', text));
+  appendMessage(item);
+}
+
+function updateByteCount() {
+  const size = new TextEncoder().encode(getElement('text').value).length;
+  const counter = getElement('byte-count');
+  counter.textContent = size + ' / 480 UTF-8 bytes';
+  counter.classList.toggle('over-limit', size > 480);
+}
+
+function formatBytes(bytes) {
+  if (bytes >= 1024 * 1024) {
+    return (bytes / (1024 * 1024)).toFixed(2) + ' MiB';
+  }
+  if (bytes >= 1024) {
+    return (bytes / 1024).toFixed(2) + ' KiB';
+  }
+  return bytes + ' B';
+}
+
+function createFileRow(event) {
+  if (fileRows.size >= 100) {
+    for (const [key, row] of fileRows) {
+      if (row.done) {
+        row.item.remove();
+        fileRows.delete(key);
+        break;
+      }
     }
-    const item=document.createElement('li'), text=document.createElement('span'), progress=document.createElement('progress'), button=document.createElement('button');
-    button.textContent='Hủy';
-    button.onclick=async()=>{try { await api('/api/cancel',{direction:e.direction,transfer_id:e.transfer_id}); } catch(err){error(err);} };
-    item.append(text,progress,button); $('files').append(item);
-    row={item,text,progress,button}; fileRows.set(key,row);
   }
-  row.done=terminal.has(e.status);
-  const bytes=e.direction==='send'?e.acknowledged_bytes:e.received_bytes;
-  row.text.textContent=`${e.direction==='send'?'Gửi tới '+e.recipient:'Nhận từ '+e.sender}: ${e.name || e.transfer_id.slice(0,8)} — ${labels[e.status] || e.status} (${bytes}/${e.total_bytes ?? '?'} byte)`;
-  if(e.cleanup_pending) row.text.textContent+=' — còn file tạm cần dọn';
-  if(e.cancel_delivery==='failed') row.text.textContent+=' — chưa báo hủy được tới server';
-  if(e.confirmation_delivery==='failed') row.text.textContent+=' — file đã lưu, gửi xác nhận thất bại';
-  if(e.message) row.text.textContent+=' — '+e.message;
-  row.progress.max=e.total_bytes || 1; row.progress.value=e.total_bytes===0&&e.status==='completed'?1:bytes;
-  row.button.disabled=row.done||!connected;
+
+  const row = {
+    item: createElement('li', 'file-card'),
+    peer: createElement('span', 'file-peer'),
+    name: createElement('strong', 'file-name'),
+    status: createElement('span', 'badge'),
+    progress: document.createElement('progress'),
+    details: createElement('span', 'file-details'),
+    warning: createElement('p', 'file-warning'),
+    button: createElement('button', 'cancel-button', 'Cancel'),
+    done: false
+  };
+  row.button.type = 'button';
+  row.button.onclick = async () => {
+    try {
+      await api('/api/cancel', {direction: event.direction, transfer_id: event.transfer_id});
+    } catch (error) {
+      showError(error);
+    }
+  };
+  const header = createElement('div', 'file-header');
+  header.append(row.peer, row.status);
+  const footer = createElement('div', 'file-footer');
+  footer.append(row.details, row.button);
+  row.item.append(header, row.name, row.progress, footer, row.warning);
+  getElement('files').append(row.item);
+  return row;
 }
-function event(e) {
-  if(e.type==='message') message(`${e.sender} → ${e.recipient==='*'?'tất cả':e.recipient}: ${e.text}`);
-  else if(e.type==='error') error(e.message);
-  else if(e.type==='file') fileUpdate(e);
-  else if(e.type==='connection') state(e.connected);
-  else if(e.type==='users') {
-    const selected=$('recipient').value; $('recipient').replaceChildren();
-    for(const name of ['*',...e.users]) {const option=document.createElement('option');option.value=name;option.textContent=name==='*'?'Tất cả':name;$('recipient').append(option);}
-    if([...$('recipient').options].some(o=>o.value===selected)) $('recipient').value=selected;
+
+function updateFile(event) {
+  const key = event.direction + ':' + event.transfer_id;
+  if (!fileRows.has(key)) {
+    fileRows.set(key, createFileRow(event));
+  }
+  const row = fileRows.get(key);
+  const bytes = event.direction === 'send' ? event.acknowledged_bytes : event.received_bytes;
+  const total = event.total_bytes;
+  row.done = terminalStatuses.has(event.status);
+  row.name.textContent = event.name || event.transfer_id.slice(0, 8);
+  row.peer.textContent = event.direction === 'send' ? 'To ' + event.recipient : 'From ' + event.sender;
+  row.status.textContent = statusLabels[event.status] || event.status;
+
+  let statusClass = 'status-active';
+  if (event.status === 'verifying' || event.status === 'completed' || event.status === 'failed') {
+    statusClass = 'status-' + event.status;
+  } else if (row.done) {
+    statusClass = '';
+  }
+  row.status.className = 'badge ' + statusClass;
+
+  // Đủ byte vẫn phải đợi kết quả SHA-256. Chỉ event completed mới báo hoàn tất.
+  row.progress.max = total || 1;
+  row.progress.value = total === 0 && event.status === 'completed' ? 1 : bytes;
+  row.progress.setAttribute('aria-label', 'Transfer progress for ' + row.name.textContent);
+  let percent = 0;
+  if (total > 0) {
+    percent = Math.min(100, Math.floor(bytes * 100 / total));
+  } else if (total === 0 && event.status === 'completed') {
+    percent = 100;
+  }
+  const totalLabel = total == null ? '?' : formatBytes(total);
+  row.details.textContent = formatBytes(bytes) + ' / ' + totalLabel + ' · ' + percent + '%';
+  row.details.title = bytes + ' / ' + (total ?? '?') + ' bytes';
+
+  const warnings = [];
+  if (event.cleanup_pending) {
+    warnings.push('Temporary file cleanup is pending.');
+  }
+  if (event.cancel_delivery === 'failed') {
+    warnings.push('Could not notify the server about cancellation.');
+  }
+  if (event.confirmation_delivery === 'failed') {
+    warnings.push('File saved, but confirmation could not be sent.');
+  }
+  if (event.message) {
+    warnings.push(event.message);
+  }
+  row.warning.textContent = warnings.join(' ');
+  row.button.disabled = row.done || !connected;
+}
+
+function handleEvent(event) {
+  switch (event.type) {
+    case 'message':
+      showMessage(event.sender, event.recipient, event.text);
+      break;
+    case 'error':
+      showError(event.message);
+      break;
+    case 'file':
+      updateFile(event);
+      break;
+    case 'connection':
+      username = event.username || '';
+      updateConnection(event.connected);
+      break;
+    case 'users':
+      updateUsers(event.users);
+      break;
   }
 }
-$('login').onsubmit=async e=>{e.preventDefault();busy=true;state(false);$('error').textContent='';try{await api('/api/login',{host:$('host').value,port:Number($('port').value),username:$('username').value,password:$('password').value});state(true);}catch(err){error(err);}finally{busy=false;$('password').value='';state(connected);}};
-$('logout').onclick=async()=>{try{await api('/api/logout',{});state(false);}catch(err){error(err);}};
-$('chat').onsubmit=async e=>{e.preventDefault();const text=$('text').value;if(new TextEncoder().encode(text).length>480){error('Tin nhắn vượt 480 byte');return;}try{await api('/api/messages',{recipient:$('recipient').value,text});message(`Bạn → ${$('recipient').value}: ${text} (đã yêu cầu gửi)`);$('text').value='';}catch(err){error(err);}};
-$('upload').onsubmit=async e=>{e.preventDefault();const file=$('file').files[0],recipient=$('recipient').value;if(!file||recipient==='*'){error('Chọn file và một người nhận riêng');return;}if(file.size>16*1024*1024){error('File vượt 16 MiB');return;}uploading=true;$('send-file').disabled=true;$('upload-status').textContent='Đang chuyển file vào client local…';try{const response=await fetch(`/api/files?recipient=${encodeURIComponent(recipient)}&name=${encodeURIComponent(file.name)}`,{method:'POST',headers:{'X-Client-Token':token},body:file});const value=await response.json();if(!response.ok)throw new Error(value.error);$('upload-status').textContent='Đã nhận yêu cầu gửi; theo dõi kết quả bên dưới.';}catch(err){error(err);$('upload-status').textContent='Upload không hoàn tất';}finally{uploading=false;$('send-file').disabled=!connected;}};
-async function poll(){try{const value=await api('/api/events?after='+cursor);if(value.reset)message('Một phần lịch sử đã hết thời gian lưu; đang hiển thị các sự kiện còn lại.');value.events.forEach(event);cursor=value.cursor;if(!busy)state(value.connected);}catch(err){state(false);error(err);}finally{setTimeout(poll,500);}}
-state(false);poll();
+
+async function login(event) {
+  event.preventDefault();
+  busy = true;
+  updateConnection(false);
+  getElement('error').textContent = '';
+  try {
+    const name = getElement('username').value;
+    await api('/api/login', {
+      host: getElement('host').value,
+      port: Number(getElement('port').value),
+      username: name,
+      password: getElement('password').value
+    });
+    username = name;
+    updateConnection(true);
+  } catch (error) {
+    showError(error);
+  } finally {
+    busy = false;
+    getElement('password').value = '';
+    updateConnection(connected);
+  }
+}
+
+async function logout() {
+  try {
+    await api('/api/logout', {});
+    updateConnection(false);
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function sendMessage(event) {
+  event.preventDefault();
+  const text = getElement('text').value;
+  const recipient = getElement('recipient').value;
+  if (new TextEncoder().encode(text).length > 480) {
+    showError('Messages must not exceed 480 UTF-8 bytes.');
+    return;
+  }
+  try {
+    await api('/api/messages', {recipient, text});
+    showMessage('You', recipient, text, true);
+    getElement('text').value = '';
+    updateByteCount();
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function uploadFile(event) {
+  event.preventDefault();
+  const file = getElement('file').files[0];
+  const recipient = getElement('recipient').value;
+  if (!file || recipient === '*') {
+    showError('Choose a file and one recipient.');
+    return;
+  }
+  if (file.size > 16 * 1024 * 1024) {
+    showError('Files must not exceed 16 MiB.');
+    return;
+  }
+
+  uploading = true;
+  getElement('send-file').disabled = true;
+  getElement('upload-status').textContent = 'Uploading to the local client…';
+  try {
+    const query = 'recipient=' + encodeURIComponent(recipient) + '&name=' + encodeURIComponent(file.name);
+    const response = await fetch('/api/files?' + query, {
+      method: 'POST',
+      headers: {'X-Client-Token': token},
+      body: file
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.error || 'The upload failed.');
+    }
+    getElement('upload-status').textContent = 'Send requested. Follow the transfer below.';
+  } catch (error) {
+    showError(error);
+    getElement('upload-status').textContent = 'Upload did not complete.';
+  } finally {
+    uploading = false;
+    getElement('send-file').disabled = !connected;
+  }
+}
+
+// Lấy các event mới theo cursor, sau đó đợi 500 ms trước lần hỏi tiếp theo.
+async function poll() {
+  try {
+    const result = await api('/api/events?after=' + cursor);
+    if (result.reset) {
+      appendMessage(createElement('li', 'message-system', 'Some older events have expired. Showing the remaining history.'));
+    }
+    for (const event of result.events) {
+      handleEvent(event);
+    }
+    cursor = result.cursor;
+    if (!busy) {
+      updateConnection(result.connected);
+    }
+  } catch (error) {
+    updateConnection(false);
+    showError(error);
+  } finally {
+    setTimeout(poll, 500);
+  }
+}
+
+getElement('login').onsubmit = login;
+getElement('logout').onclick = logout;
+getElement('chat').onsubmit = sendMessage;
+getElement('upload').onsubmit = uploadFile;
+getElement('recipient').onchange = updateRecipient;
+getElement('text').oninput = updateByteCount;
+getElement('file').onchange = () => {
+  const file = getElement('file').files[0];
+  getElement('selected-file').textContent = file ? file.name : 'No file selected';
+};
+updateConnection(false);
+poll();

@@ -43,8 +43,8 @@ async def main():
             assert files[0].read_bytes() == source.read_bytes()
             assert build_metadata(files[0])["sha256"] == build_metadata(source)["sha256"]
             assert receiver.reserved_bytes == 0
-            print("send_file() hoàn tất: 5120 byte, nội dung và SHA-256 khớp.")
-            print("Demo dùng mock; không chứng minh ACK/retry hay truyền UDP thật.")
+            print("send_file() completed: 5120 bytes, matching content and SHA-256.")
+            print("Mock demo; this does not verify ACK, retry or real UDP transfer.")
         finally:
             for task in tasks:
                 task.cancel()

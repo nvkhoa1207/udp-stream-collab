@@ -24,9 +24,9 @@ FILE_CANCEL_TIMEOUT_SECONDS = 3.0
 def prepare_metadata(path: Path) -> dict:
     """Đọc từng chunk, chặn cả trường hợp file lớn lên trong lúc tính hash."""
     if not path.is_file():
-        raise ValueError("Chỉ gửi file thông thường")
+        raise ValueError("Only regular files can be sent")
     if path.stat().st_size > MAX_SEND_FILE_BYTES:
-        raise ValueError("File vượt giới hạn gửi 16 MiB")
+        raise ValueError("File exceeds the 16 MiB send limit")
     digest = hashlib.sha256()
     size = chunks = 0
     source = iter_chunks(path)
@@ -34,7 +34,7 @@ def prepare_metadata(path: Path) -> dict:
         for chunk in source:
             size += len(chunk)
             if size > MAX_SEND_FILE_BYTES:
-                raise ValueError("File vượt giới hạn gửi 16 MiB")
+                raise ValueError("File exceeds the 16 MiB send limit")
             chunks += 1
             digest.update(chunk)
     finally:
@@ -61,7 +61,7 @@ class FileSender:
         self.meta_started = False
         self.remote_cancel = False
         self.acknowledged_bytes = 0
-        # Dùng result thay exception để không có Future exception chưa được đọc.
+        # Lưu lỗi bằng set_result để tránh cảnh báo lỗi Future chưa được đọc.
         self.failure = asyncio.get_running_loop().create_future()
 
     def fail(self, error: Exception) -> None:
@@ -75,7 +75,7 @@ class FileSender:
             if (packet.sender == self.recipient
                     and cancelled_transfer_id(packet) == self.transfer_id):
                 self.remote_cancel = True
-                self.fail(FileTransferCancelled("Bên nhận đã hủy lượt truyền"))
+                self.fail(FileTransferCancelled("The receiver cancelled the transfer"))
                 return True
             return False
         if packet.kind == MessageType.ERROR:
@@ -97,7 +97,7 @@ class FileSender:
         try:
             if packet.kind == MessageType.FILE_ACCEPT and self.phase == "accept":
                 if packet.payload != b"" or packet.chunk_index is not None:
-                    raise ValueError("FILE_ACCEPT không hợp lệ")
+                    raise ValueError("Invalid FILE_ACCEPT")
                 self.accepted.set()
             elif packet.kind == MessageType.FILE_COMPLETE and self.phase == "complete":
                 body = self._json(packet.payload)
@@ -108,7 +108,7 @@ class FileSender:
                         or re.fullmatch(r"[0-9a-fA-F]{64}", body["sha256"]) is None
                         or body["sha256"].lower() != self.metadata["sha256"]
                         or packet.chunk_index is not None):
-                    raise ValueError("FILE_COMPLETE sai kích thước hoặc SHA-256")
+                    raise ValueError("FILE_COMPLETE size or SHA-256 does not match")
                 self.completed.set()
         except ValueError as exc:
             self.fail(exc)
@@ -116,31 +116,31 @@ class FileSender:
     @staticmethod
     def _json(payload: bytes) -> dict:
         if not isinstance(payload, bytes) or len(payload) > MAX_PAYLOAD_BYTES:
-            raise ValueError("Phản hồi file quá lớn hoặc sai kiểu")
+            raise ValueError("File response is too large or has an invalid type")
         try:
             body = json.loads(payload.decode("utf-8"))
         except (ValueError, UnicodeError, RecursionError) as exc:
-            raise ValueError("Phản hồi file không phải JSON hợp lệ") from exc
+            raise ValueError("File response is not valid JSON") from exc
         if type(body) is not dict:
-            raise ValueError("Phản hồi file phải là object")
+            raise ValueError("File response must be an object")
         return body
 
     async def _send(self, kind, payload=b"", index=None):
         packet = Packet(kind=kind, sender=self.username, recipient=self.recipient,
                         stream_id=self.transfer_id, payload=payload, chunk_index=index)
-        # Đăng ký trước send: mock/bên nhận có thể trả lời ngay lập tức.
+        # Ghi nhận trước khi gửi vì bên nhận có thể trả lời ngay.
         self.message_ids.add(packet.message_id)
         if kind == MessageType.FILE_META:
             self.meta_started = True
         await asyncio.wait_for(self.transport.send(self.server_peer, packet),
                                timeout=FILE_SEND_TIMEOUT_SECONDS)
         if kind == MessageType.FILE_CHUNK:
-            # Mỗi chunk chỉ gọi send một lần; retry/ACK trùng thuộc transport.
+            # Mỗi phần file gọi send một lần. Transport tự lo gửi lại và ACK trùng.
             self.acknowledged_bytes += len(payload)
             self.updates.update(self.transfer_id, acknowledged_bytes=self.acknowledged_bytes)
 
     def request_cancel(self):
-        self.fail(FileTransferCancelled("Đã yêu cầu hủy gửi file"))
+        self.fail(FileTransferCancelled("File cancellation requested"))
 
     async def _notify_cancel(self):
         packet = Packet(
@@ -154,7 +154,7 @@ class FileSender:
                                    timeout=FILE_CANCEL_TIMEOUT_SECONDS)
         except Exception:
             return "failed"
-        # Chỉ xác nhận chặng server; không khẳng định receiver đã dọn file.
+        # ACK này chỉ từ server, chưa cho biết bên nhận đã dọn file hay chưa.
         return "sent_to_server"
 
     async def run(self, path: Path) -> None:
@@ -170,7 +170,7 @@ class FileSender:
             status = "cancelled"
             raise
         finally:
-            # Giữ cleanup chạy kể cả caller cancel thêm khi đang báo bên nhận.
+            # Vẫn dọn file nếu tác vụ bị hủy lần nữa trong lúc báo bên nhận.
             cleanup = asyncio.create_task(self._finish(work, status))
             try:
                 await asyncio.shield(cleanup)
@@ -197,10 +197,15 @@ class FileSender:
         self.metadata = await self.file_io(prepare_metadata, path)
         payload = json.dumps(self.metadata, ensure_ascii=False).encode("utf-8")
         if len(payload) > MAX_PAYLOAD_BYTES:
-            raise ValueError("Metadata vượt giới hạn 480 byte")
+            raise ValueError("Metadata exceeds the 480-byte limit")
 
         self.phase = "accept"
-        self.updates.update(self.transfer_id, status="waiting_accept", total_bytes=self.metadata["size"])
+        self.updates.update(
+            self.transfer_id,
+            status="waiting_accept",
+            total_bytes=self.metadata["size"],
+            name=self.metadata["name"],
+        )
         await self._send(MessageType.FILE_META, payload)
         await asyncio.wait_for(self.accepted.wait(), timeout=FILE_RESPONSE_TIMEOUT_SECONDS)
 
@@ -216,7 +221,7 @@ class FileSender:
                     break
                 size += sum(map(len, batch))
                 if size > self.metadata["size"]:
-                    raise ValueError("File nguồn đã thay đổi khi đang gửi")
+                    raise ValueError("Source file changed during transfer")
                 # TaskGroup hủy và đợi các send còn lại nếu một send bị lỗi.
                 async with asyncio.TaskGroup() as tasks:
                     for chunk in batch:
@@ -228,7 +233,7 @@ class FileSender:
 
         if (size != self.metadata["size"] or index != self.metadata["total_chunks"]
                 or digest.hexdigest() != self.metadata["sha256"]):
-            raise ValueError("File nguồn đã thay đổi khi đang gửi")
+            raise ValueError("Source file changed during transfer")
         self.phase = "complete"
         self.updates.update(self.transfer_id, status="verifying")
         await self._send(MessageType.FILE_END)

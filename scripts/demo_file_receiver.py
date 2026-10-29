@@ -34,13 +34,13 @@ def main():
             chunks[index]
         )
 
-        print(f"Đã đưa chunk {index} vào FileReceiver")
+        print(f"Delivered chunk {index} into FileReceiver")
 
     received_count = len(
         receiver.transfers[transfer_id]["received"]
     )
 
-    print("Số chunk khác nhau đã nhận:", received_count)
+    print("Unique chunks received:", received_count)
     assert received_count == metadata["total_chunks"]
 
     saved_path = receiver.finish(transfer_id)
@@ -51,8 +51,8 @@ def main():
         metadata["sha256"] == saved_metadata["sha256"]
     )
 
-    print("Hash giống nhau:", same_hash)
-    print("File đã lưu:", saved_path)
+    print("Hashes match:", same_hash)
+    print("Saved file:", saved_path)
     assert same_hash and saved_path.read_bytes() == content
     assert transfer_id not in receiver.transfers
     assert not (receiver.output_directory / f"{transfer_id}.part").exists()

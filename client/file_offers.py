@@ -69,12 +69,12 @@ class FileOfferReceiver:
             elif transfer is None:
                 offer = self._offers.get(transfer_id)
                 if offer is not None:
-                    reply = self._error(offer, "FILE_EXPIRED", "Lượt nhận đã hết hạn")
+                    reply = self._error(offer, "FILE_EXPIRED", "Incoming transfer expired")
                     self._notifications[transfer_id] = self._remember_result(offer, reply)
                 else:
-                    self._settle(transfer_id, "expired", code="FILE_EXPIRED", message="Lượt nhận đã hết hạn")
+                    self._settle(transfer_id, "expired", code="FILE_EXPIRED", message="Incoming transfer expired")
             elif transfer["failed"]:
-                self._settle(transfer_id, "failed", code="FILE_STORAGE_ERROR", message="Chưa dọn được file tạm")
+                self._settle(transfer_id, "failed", code="FILE_STORAGE_ERROR", message="Temporary file cleanup failed")
 
     def _reject(self, packet, code, message):
         self._settle(packet.stream_id, "failed", code=code, message=message)
@@ -115,14 +115,14 @@ class FileOfferReceiver:
             return None
         if (type(packet.stream_id) is not str
                 or re.fullmatch(r"[0-9a-f]{32}", packet.stream_id) is None):
-            return self._error(packet, "INVALID_FILE_META", "Mã lượt truyền file không hợp lệ")
+            return self._error(packet, "INVALID_FILE_META", "Invalid file transfer ID")
         if self.receiver is None:
-            return self._error(packet, "FILE_RECEIVE_DISABLED", "Client chưa cấu hình nơi nhận file")
+            return self._error(packet, "FILE_RECEIVE_DISABLED", "No receive folder is configured")
         transfer_id = packet.stream_id
         if transfer_id in self.seen_ids:
-            return self._error(packet, "FILE_ID_REUSED", "Không tái sử dụng mã lượt truyền trong phiên")
+            return self._error(packet, "FILE_ID_REUSED", "Transfer IDs cannot be reused in a session")
         if len(self.seen_ids) >= MAX_FILE_OFFERS_PER_SESSION:
-            return self._error(packet, "FILE_SESSION_LIMIT", "Đã hết lượt truyền trong phiên; cần phiên mới")
+            return self._error(packet, "FILE_SESSION_LIMIT", "Session transfer quota reached; reconnect to continue")
 
         # Giữ dấu kể cả sau lỗi/expire, tránh META đến muộn tạo lại file cũ.
         self.seen_ids.add(transfer_id)
@@ -130,22 +130,22 @@ class FileOfferReceiver:
             try:
                 self.updates.begin(transfer_id, packet.sender, direction="receive")
             except RuntimeError:
-                return self._error(packet, "FILE_STATUS_LIMIT", "Cần đọc cập nhật trước khi nhận thêm file")
+                return self._error(packet, "FILE_STATUS_LIMIT", "Read pending updates before receiving another file")
         try:
             if not isinstance(packet.payload, bytes) or len(packet.payload) > MAX_PAYLOAD_BYTES:
-                raise ValueError("Payload quá lớn hoặc sai kiểu")
+                raise ValueError("Payload is too large or has an invalid type")
             metadata = json.loads(packet.payload.decode("utf-8"))
         except (ValueError, UnicodeError, RecursionError):
-            return self._reject(packet, "INVALID_FILE_META", "Metadata không phải JSON UTF-8 hợp lệ")
+            return self._reject(packet, "INVALID_FILE_META", "Metadata is not valid UTF-8 JSON")
 
         try:
             # begin() kiểm tra schema, hash, tên, size/quota và tạo .part.
             self.receiver.begin(transfer_id, metadata)
         except ValueError:
-            return self._reject(packet, "FILE_REJECTED", "Metadata không hợp lệ hoặc vượt giới hạn nhận file")
+            return self._reject(packet, "FILE_REJECTED", "Invalid metadata or file receive limit exceeded")
         except (OSError, ExceptionGroup):
             # Không đưa đường dẫn máy hoặc thông tin lỗi hệ thống vào gói mạng.
-            return self._reject(packet, "FILE_STORAGE_ERROR", "Không chuẩn bị được nơi lưu file")
+            return self._reject(packet, "FILE_STORAGE_ERROR", "Could not prepare the destination file")
         finally:
             self._sync_expired()
 
@@ -196,7 +196,7 @@ class FileOfferReceiver:
         try:
             self.receiver.cancel(packet.stream_id)
         except OSError:
-            code, message = "FILE_STORAGE_ERROR", "Không dọn được file tạm; sẽ thử lại"
+            code, message = "FILE_STORAGE_ERROR", "Temporary file cleanup failed; will retry"
         return self._remember_result(packet, self._error(packet, code, message))
 
     def handle(self, packet: Packet) -> Packet | None:
@@ -212,23 +212,23 @@ class FileOfferReceiver:
         transfer_id = packet.stream_id
         if (type(transfer_id) is not str
                 or re.fullmatch(r"[0-9a-f]{32}", transfer_id) is None):
-            return self._error(packet, "FILE_DATA_ERROR", "Mã lượt truyền file không hợp lệ")
+            return self._error(packet, "FILE_DATA_ERROR", "Invalid file transfer ID")
         if self.receiver is None:
-            return self._error(packet, "FILE_RECEIVE_DISABLED", "Client chưa cấu hình nơi nhận file")
+            return self._error(packet, "FILE_RECEIVE_DISABLED", "No receive folder is configured")
 
         self._prune()
         cached = self.results.get(transfer_id)
         owner = cached[0] if cached is not None else self.owners.get(transfer_id)
         if owner is None:
-            return self._error(packet, "FILE_NOT_ACTIVE", "Lượt nhận chưa mở hoặc đã kết thúc")
+            return self._error(packet, "FILE_NOT_ACTIVE", "Incoming transfer has not started or has already ended")
         if owner != packet.sender:
-            return self._error(packet, "FILE_SENDER_MISMATCH", "Người gửi không khớp lượt truyền")
+            return self._error(packet, "FILE_SENDER_MISMATCH", "Sender does not match the transfer")
 
         if cached is not None:
             # Không gia hạn cache khi có gói lặp, không gọi finish() lần hai.
             if packet.kind == MessageType.FILE_END:
                 if not isinstance(packet.payload, bytes) or packet.payload != b"" or packet.chunk_index is not None:
-                    return self._error(packet, "FILE_DATA_ERROR", "FILE_END phải có payload rỗng")
+                    return self._error(packet, "FILE_DATA_ERROR", "FILE_END must have an empty payload")
                 return cached[1]
             return cached[1] if cached[1].kind == MessageType.ERROR else None
 
@@ -242,17 +242,17 @@ class FileOfferReceiver:
                 return None
 
             if not isinstance(packet.payload, bytes) or packet.payload != b"" or packet.chunk_index is not None:
-                raise ValueError("FILE_END sai định dạng")
+                raise ValueError("Invalid FILE_END format")
             metadata = dict(self.receiver.transfers[transfer_id]["metadata"])
             self._update(transfer_id, status="verifying")
             # finish() chỉ thành công sau khi đủ chunk, đúng size/hash và lưu xong.
             self.receiver.finish(transfer_id)
         except TimeoutError:
-            return self._fail(packet, "FILE_EXPIRED", "Lượt nhận file đã hết hạn")
+            return self._fail(packet, "FILE_EXPIRED", "Incoming file transfer expired")
         except ValueError:
-            return self._fail(packet, "FILE_DATA_ERROR", "Thiếu chunk hoặc dữ liệu/size/hash không hợp lệ")
+            return self._fail(packet, "FILE_DATA_ERROR", "Missing chunks or invalid data, size or hash")
         except OSError:
-            return self._fail(packet, "FILE_STORAGE_ERROR", "Không ghi hoặc hoàn tất được file")
+            return self._fail(packet, "FILE_STORAGE_ERROR", "Could not write or finalize the file")
 
         reply = Packet(
             kind=MessageType.FILE_COMPLETE, sender=self.username,
@@ -273,17 +273,17 @@ class FileOfferReceiver:
         cached = self.results.get(transfer_id)
         owner = cached[0] if cached is not None else self.owners.get(transfer_id)
         if owner is not None and owner != packet.sender:
-            return self._error(packet, "FILE_SENDER_MISMATCH", "Người gửi không khớp lượt truyền")
+            return self._error(packet, "FILE_SENDER_MISMATCH", "Sender does not match the transfer")
         if cached is not None:
             # COMPLETE đã có thì không xóa file; CANCEL lặp không kéo dài cache.
             return cached[1]
         if transfer_id not in self.seen_ids:
             if len(self.seen_ids) >= MAX_FILE_OFFERS_PER_SESSION:
-                return self._error(packet, "FILE_SESSION_LIMIT", "Đã hết lượt truyền trong phiên")
+                return self._error(packet, "FILE_SESSION_LIMIT", "Session transfer quota reached")
             # CANCEL đi control có thể vượt META đi stream file.
             self.seen_ids.add(transfer_id)
         target = replace(packet, stream_id=transfer_id)
-        return self._fail(target, "FILE_CANCELLED", "Lượt truyền file đã bị hủy")
+        return self._fail(target, "FILE_CANCELLED", "File transfer was cancelled")
 
     def expire(self) -> list[str]:
         try:
@@ -299,7 +299,7 @@ class FileOfferReceiver:
             return None
         self._update(transfer_id, cancel_delivery="pending")
         self._local_cancelling.add(transfer_id)
-        self._fail(offer, "FILE_CANCELLED", "Người nhận đã hủy lượt truyền")
+        self._fail(offer, "FILE_CANCELLED", "The receiver cancelled the transfer")
         return Packet(
             kind=MessageType.FILE_CANCEL, sender=self.username, recipient=offer.sender,
             stream_id="control", payload=json.dumps({
@@ -325,13 +325,13 @@ class FileOfferReceiver:
             self._confirming.clear()
             for transfer_id in list(self._watching):
                 if transfer_id in self.receiver.transfers:
-                    self._settle(transfer_id, "failed", code="FILE_STORAGE_ERROR", message="Chưa dọn được file tạm khi đóng client")
+                    self._settle(transfer_id, "failed", code="FILE_STORAGE_ERROR", message="Could not remove temporary files when closing the client")
                 elif transfer_id in self._cleanup_pending:
                     self._update(transfer_id, cleanup_pending=False)
                     self._watching.discard(transfer_id)
                     self._cleanup_pending.discard(transfer_id)
                 else:
-                    self._settle(transfer_id, "cancelled", code="CLIENT_CLOSED", message="Client đã dừng nhận file")
+                    self._settle(transfer_id, "cancelled", code="CLIENT_CLOSED", message="Client stopped receiving files")
             self.owners.clear()
             self.results.clear()
             self._offers.clear()

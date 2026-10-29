@@ -20,7 +20,7 @@ class CongestionTests(unittest.TestCase):
         self.assertEqual(cc.loss_events, 1)
         cc.on_ack(1000, 0.1)
         self.assertEqual(cc.bytes_in_flight, 500)
-        cc.on_ack(1000, 0.1)  # impossible/duplicate release ignored
+        cc.on_ack(1000, 0.1)  # Bỏ ACK trùng hoặc ACK nhiều byte hơn số đang gửi.
         self.assertEqual(cc.bytes_in_flight, 500)
         now[0] = 12
         before = cc.cwnd

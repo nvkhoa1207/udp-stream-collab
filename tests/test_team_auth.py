@@ -1,4 +1,4 @@
-"""The team's actual TCP client against the team's actual server."""
+"""Thử đăng nhập bằng client TCP và server thật của nhóm."""
 import asyncio
 import unittest
 

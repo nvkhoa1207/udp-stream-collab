@@ -41,11 +41,11 @@ async def main():
         try:
             await send(MessageType.FILE_META, json.dumps(metadata).encode())
             assert (await reply()).kind == MessageType.FILE_ACCEPT
-            print("META hợp lệ -> FILE_ACCEPT")
+            print("Valid META -> FILE_ACCEPT")
 
             for index in [2, 0, 0, 1]:
                 await send(MessageType.FILE_CHUNK, chunks[index], index)
-                print("Đưa vào client chunk:", index)
+                print("Deliver chunk to client:", index)
             await send(MessageType.FILE_END)
             complete = await reply()
             assert complete.kind == MessageType.FILE_COMPLETE
@@ -56,12 +56,12 @@ async def main():
             assert target.read_bytes() == source.read_bytes()
             assert receiver.reserved_bytes == 0
             assert not list(receiver.output_directory.glob("*.part"))
-            print("FILE_COMPLETE: đủ 1000 byte, hash đúng, nội dung khớp.")
+            print("FILE_COMPLETE: all 1000 bytes received, hash and content match.")
 
             await send(MessageType.FILE_END)
             assert await reply() == complete
             assert len(list(receiver.output_directory.iterdir())) == 1
-            print("END lặp: trả lại COMPLETE, không tạo thêm file.")
+            print("Duplicate END: resend COMPLETE without creating another file.")
         finally:
             receive_task.cancel()
             try:
@@ -70,7 +70,7 @@ async def main():
                 pass
             await local.close()
             await server.close()
-        print("Demo qua mock; thư mục tạm sẽ được dọn khi kết thúc.")
+        print("Mock demo; temporary folders are cleaned on exit.")
 
 
 if __name__ == "__main__":

@@ -31,18 +31,18 @@ async def main():
         # Tin nhắn đến sau trang 1: vòng nhận phải tiếp tục, không chờ trang 0.
         await server.send(local.address, Packet(
             kind=MessageType.MSG, sender="hai", recipient="khoa",
-            stream_id="chat-khoa", payload="Chào Khoa!".encode("utf-8"),
+            stream_id="chat-khoa", payload="Hello Khoa!".encode("utf-8"),
         ))
         event = await asyncio.wait_for(client.events.get(), timeout=1)
         assert event["type"] == "message"
-        print("Có trang số 1, còn thiếu trang số 0: chưa phát danh sách online.")
-        print("Vẫn nhận chat:", event["text"])
+        print("Page 1 received, page 0 missing: online list is not emitted yet.")
+        print("Chat still received:", event["text"])
 
         await send_page(0, ["khoa"])
         event = await asyncio.wait_for(client.events.get(), timeout=1)
         assert event == {"type": "users", "revision": 7, "users": ["khoa", "hai"]}
-        print("Đủ hai trang, revision:", event["revision"])
-        print("Danh sách online:", ", ".join(event["users"]))
+        print("Both pages received, revision:", event["revision"])
+        print("Online users:", ", ".join(event["users"]))
     finally:
         receive_task.cancel()
         try:

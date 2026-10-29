@@ -1,4 +1,4 @@
-"""Bounded UDP endpoint shared by the client and server (no encryption)."""
+"""Gửi UDP có ACK, gửi lại và giới hạn bộ đệm; chưa mã hóa dữ liệu."""
 import asyncio
 import re
 from dataclasses import dataclass, field, replace
@@ -7,7 +7,7 @@ from ipaddress import ip_address
 from common.codec import decode_packet, encode_packet
 from common.config import MAX_DATAGRAM_BYTES
 from common.config import RECEIVE_WINDOW_PACKETS, MAX_RECEIVE_STREAMS
-from common.models import MessageType as M, Packet, ReceivedPacket
+from common.models import MessageType, Packet, ReceivedPacket
 from transport.congestion import CongestionController
 
 
@@ -64,13 +64,13 @@ class ReliableUdpTransport:
         self.last_socket_error = None
         self.retry_seconds = retry_seconds
         self.max_retries = max_retries
-        self._tx = {}
-        self._rx = {}
-        self._pending = {}
+        self._tx = {}  # Trạng thái các luồng gửi, khóa là (địa chỉ, stream_id).
+        self._rx = {}  # Trạng thái các luồng nhận, dùng cùng dạng khóa.
+        self._pending = {}  # Các gói đang chờ ACK, thêm seq vào khóa.
         self._inflight = set()
         self._send_completion = set()
-        self._tombstones = {}
-        self._draining = {}
+        self._tombstones = {}  # Dấu của luồng đã đóng để nhận ra gói đến muộn.
+        self._draining = {}  # Luồng đang chờ xử lý hết gói trước khi đóng.
         self.probe_seconds = probe_seconds
         self.stall_seconds = stall_seconds
         self.max_streams = max_streams
@@ -135,10 +135,10 @@ class ReliableUdpTransport:
                 future.set_result(error)
 
     def finish_stream(self, peer, stream_id, *, success=True):
-        """Close both directions after application completion; keep a small tombstone.
+        """Đóng luồng khi xong và giữ số thứ tự cuối để nhận ra gói trùng.
 
-        File result payload caches live in FileOfferReceiver (120 seconds).
-        Late delivered DATA can still be ACKed, never delivered a second time.
+        Gói cũ đã xử lý vẫn được ACK nhưng không đưa lên ứng dụng lần nữa.
+        FileOfferReceiver giữ riêng phản hồi kết quả file trong 120 giây.
         """
         if stream_id == 'control' or stream_id.startswith('chat-'):
             return
@@ -159,14 +159,21 @@ class ReliableUdpTransport:
     def _can_reserve(self, peer, stream_id):
         if stream_id == 'control' or stream_id.startswith('chat-'):
             return True
-        history = {k[1] for k in (*self._tombstones, *self._rx, *self._tx)
-                   if k[0] == peer and k[1] != 'control' and not k[1].startswith('chat-')}
+        history = set()
+        for address, name in (*self._tombstones, *self._rx, *self._tx):
+            if address == peer and name != 'control' and not name.startswith('chat-'):
+                history.add(name)
         return stream_id in history or len(history) < 4096
 
     def _control(self, peer, packet, kind, **kwargs):
-        self._write(peer, Packet(kind=kind, sender=self.identity or (packet.recipient if packet.recipient != '*' else 'server'),
-            recipient=packet.sender, stream_id=packet.stream_id,
-            session_id=packet.session_id, **kwargs))
+        sender = self.identity
+        if not sender:
+            sender = packet.recipient if packet.recipient != '*' else 'server'
+        reply = Packet(
+            kind=kind, sender=sender, recipient=packet.sender,
+            stream_id=packet.stream_id, session_id=packet.session_id, **kwargs,
+        )
+        self._write(peer, reply)
 
     async def start(self):
         if self._socket is not None or self._closed:
@@ -184,7 +191,7 @@ class ReliableUdpTransport:
     def _received(self, peer, packet):
         if self._closed:
             return
-        if packet.kind == M.BIND and self.bootstrap is not None:
+        if packet.kind == MessageType.BIND and self.bootstrap is not None:
             self.bootstrap(peer, packet)
             return
         if self._peers.get(peer) != packet.session_id:
@@ -192,12 +199,12 @@ class ReliableUdpTransport:
         if self.authorize is not None and not self.authorize(peer, packet):
             raise ValueError('Packet rejected by session policy')
         self.last_received = asyncio.get_running_loop().time()
-        if packet.kind in (M.BIND_OK, M.HEARTBEAT):
+        if packet.kind in (MessageType.BIND_OK, MessageType.HEARTBEAT):
             self._incoming.put_nowait(ReceivedPacket(peer, packet))
             self.notify_delivery()
             return
         key = (peer, packet.stream_id)
-        if packet.kind == M.ACK:
+        if packet.kind == MessageType.ACK:
             ack_key = (*key, packet.ack)
             future = self._pending.get(ack_key) if ack_key in self._inflight else None
             if future is not None and not future.done():
@@ -206,7 +213,7 @@ class ReliableUdpTransport:
                 state.changed.set()
                 future.set_result(None)
             return
-        if packet.kind == M.WINDOW_UPDATE:
+        if packet.kind == MessageType.WINDOW_UPDATE:
             state = self._tx.get(key)
             if state is not None and packet.recv_limit > state.limit:
                 state.limit = packet.recv_limit
@@ -215,23 +222,23 @@ class ReliableUdpTransport:
         if key in self._tombstones:
             consumed, _ = self._tombstones[key]
             if packet.seq and packet.seq <= consumed:
-                self._control(peer, packet, M.ACK, ack=packet.seq, recv_limit=consumed)
-            elif packet.kind == M.WINDOW_PROBE:
-                self._control(peer, packet, M.WINDOW_UPDATE, recv_limit=0)
+                self._control(peer, packet, MessageType.ACK, ack=packet.seq, recv_limit=consumed)
+            elif packet.kind == MessageType.WINDOW_PROBE:
+                self._control(peer, packet, MessageType.WINDOW_UPDATE, recv_limit=0)
             return
         state = self._rx.get(key)
-        if packet.kind == M.WINDOW_PROBE:
+        if packet.kind == MessageType.WINDOW_PROBE:
             if state is None and len(self._rx) < self.max_streams and self._can_reserve(*key):
                 state = self._rx[key] = _ReceiveStream()
             if state is not None:
                 state.advertised = True
-            self._control(peer, packet, M.WINDOW_UPDATE,
+            self._control(peer, packet, MessageType.WINDOW_UPDATE,
                 recv_limit=state.consumed + RECEIVE_WINDOW_PACKETS if state else 0)
             return
         if state is None or not state.advertised:
             return
         if packet.seq <= state.consumed or packet.seq in state.packets:
-            self._control(peer, packet, M.ACK, ack=packet.seq, recv_limit=state.consumed + RECEIVE_WINDOW_PACKETS)
+            self._control(peer, packet, MessageType.ACK, ack=packet.seq, recv_limit=state.consumed + RECEIVE_WINDOW_PACKETS)
             return
         if key in self._draining:
             return
@@ -239,7 +246,7 @@ class ReliableUdpTransport:
             return
         state.packets[packet.seq] = packet
         self._queue_ready(key, state)
-        self._control(peer, packet, M.ACK, ack=packet.seq, recv_limit=state.consumed + RECEIVE_WINDOW_PACKETS)
+        self._control(peer, packet, MessageType.ACK, ack=packet.seq, recv_limit=state.consumed + RECEIVE_WINDOW_PACKETS)
 
     def _queue_ready(self, key, state):
         while state.queued + 1 in state.packets and not self._incoming.full():
@@ -259,16 +266,60 @@ class ReliableUdpTransport:
             else:
                 self._queue_ready(key, state)
 
+    async def _wait_for_window(self, peer, packet, state):
+        """Đợi bên nhận báo còn chỗ; hỏi lại nếu chưa nhận được cập nhật."""
+        loop = asyncio.get_running_loop()
+        progress_at, old_limit = loop.time(), state.limit
+        while packet.seq > state.limit:
+            if state.error is not None:
+                raise state.error
+            if state.limit > old_limit:
+                progress_at, old_limit = loop.time(), state.limit
+            if loop.time() - progress_at >= self.stall_seconds:
+                raise TimeoutError('Receive window stalled')
+            state.changed.clear()
+            if loop.time() >= state.probe_at:
+                state.probe_at = loop.time() + self.probe_seconds
+                probe = replace(
+                    packet, kind=MessageType.WINDOW_PROBE,
+                    seq=0, payload=b'', chunk_index=None,
+                )
+                self._write(peer, probe)
+            try:
+                wait_seconds = max(0.001, state.probe_at - loop.time())
+                await asyncio.wait_for(state.changed.wait(), wait_seconds)
+            except TimeoutError:
+                pass
+
+    async def _wait_for_budget(self, congestion, wake, size, state):
+        """Đợi đủ cửa sổ byte và tới thời điểm được gửi gói tiếp theo."""
+        loop = asyncio.get_running_loop()
+        congestion_deadline = loop.time() + self.stall_seconds
+        while congestion.budget_bytes() < size or loop.time() < congestion.next_send:
+            if state.error is not None:
+                raise state.error
+            if loop.time() >= congestion_deadline:
+                raise TimeoutError('Congestion budget stalled')
+            wake.clear()
+            if congestion.budget_bytes() >= size:
+                delay = max(0.001, congestion.next_send - loop.time())
+            else:
+                delay = 0.1
+            try:
+                await asyncio.wait_for(wake.wait(), delay)
+            except TimeoutError:
+                pass
+
     async def send(self, peer, packet):
         if self._closed:
             raise ConnectionError('Transport closed')
         if peer not in self._peers:
             raise ValueError('Peer not registered')
         packet = replace(packet, session_id=self._peers[peer])
-        if packet.kind in (M.BIND, M.BIND_OK, M.HEARTBEAT):
+        if packet.kind in (MessageType.BIND, MessageType.BIND_OK, MessageType.HEARTBEAT):
             self._write(peer, packet)
             return
-        if packet.kind in (M.ACK, M.WINDOW_PROBE, M.WINDOW_UPDATE):
+        if packet.kind in (MessageType.ACK, MessageType.WINDOW_PROBE, MessageType.WINDOW_UPDATE):
             raise ValueError('Transport owns ACK/window packets')
         key = (peer, packet.stream_id)
         if key in self._tombstones:
@@ -284,7 +335,7 @@ class ReliableUdpTransport:
             raise state.error
         if len(self._pending) >= 1024:
             raise ValueError('Pending send quota reached')
-        # Validate before reserving a sequence: malformed application packets cannot leave a hole.
+        # Kiểm tra trước khi tăng seq để gói lỗi không làm thiếu số thứ tự.
         encode_packet(replace(packet, seq=state.sequence + 1 if state else 1))
         if state is None:
             state = self._tx[key] = _SendStream()
@@ -295,41 +346,15 @@ class ReliableUdpTransport:
         completion = asyncio.get_running_loop().create_future()
         self._send_completion.add(completion)
         self._pending[pending_key] = future
-        cc = self._congestion[peer]
+        congestion = self._congestion[peer]
         wake = self._congestion_changed[peer]
         size = len(encode_packet(packet))
         reserved = False
         try:
             loop = asyncio.get_running_loop()
-            progress_at, old_limit = loop.time(), state.limit
-            while packet.seq > state.limit:
-                if state.error is not None:
-                    raise state.error
-                if state.limit > old_limit:
-                    progress_at, old_limit = loop.time(), state.limit
-                if loop.time() - progress_at >= self.stall_seconds:
-                    raise TimeoutError('Receive window stalled')
-                state.changed.clear()
-                if loop.time() >= state.probe_at:
-                    state.probe_at = loop.time() + self.probe_seconds
-                    self._write(peer, replace(packet, kind=M.WINDOW_PROBE, seq=0, payload=b'', chunk_index=None))
-                try:
-                    await asyncio.wait_for(state.changed.wait(), max(0.001, state.probe_at - loop.time()))
-                except TimeoutError:
-                    pass
-            congestion_deadline = loop.time() + self.stall_seconds
-            while cc.budget_bytes() < size or loop.time() < cc.next_send:
-                if state.error is not None:
-                    raise state.error
-                if loop.time() >= congestion_deadline:
-                    raise TimeoutError('Congestion budget stalled')
-                wake.clear()
-                delay = max(0.001, cc.next_send - loop.time()) if cc.budget_bytes() >= size else 0.1
-                try:
-                    await asyncio.wait_for(wake.wait(), delay)
-                except TimeoutError:
-                    pass
-            ticket = cc.on_sent(size)
+            await self._wait_for_window(peer, packet, state)
+            await self._wait_for_budget(congestion, wake, size, state)
+            ticket = congestion.on_sent(size)
             reserved = True
             sent_at = loop.time()
             if state.error is not None:
@@ -337,32 +362,32 @@ class ReliableUdpTransport:
             self._inflight.add(pending_key)
             for attempt in range(self.max_retries + 1):
                 if attempt:
-                    while loop.time() < cc.next_send and not future.done():
+                    while loop.time() < congestion.next_send and not future.done():
                         try:
-                            await asyncio.wait_for(asyncio.shield(future), cc.next_send - loop.time())
+                            await asyncio.wait_for(asyncio.shield(future), congestion.next_send - loop.time())
                         except TimeoutError:
                             pass
                     if future.done():
                         result = future.result()
                         if result is not None:
                             raise result
-                        cc.on_ack(size, 0)
+                        congestion.on_ack(size, 0)
                         reserved = False
                         wake.set()
                         return
-                    cc.next_send = loop.time() + max(0.0001, cc.rtt * size / cc.cwnd)
+                    congestion.next_send = loop.time() + max(0.0001, congestion.rtt * size / congestion.cwnd)
                 self._write(peer, packet)
                 try:
                     result = await asyncio.wait_for(asyncio.shield(future),
                         min(4.0, self.retry_seconds * 2 ** attempt))
                     if result is not None:
                         raise result
-                    cc.on_ack(size, loop.time() - sent_at if attempt == 0 else 0)
+                    congestion.on_ack(size, loop.time() - sent_at if attempt == 0 else 0)
                     reserved = False
                     wake.set()
                     return
                 except TimeoutError:
-                    cc.on_loss(size, ticket=ticket)
+                    congestion.on_loss(size, ticket=ticket)
                     if attempt == self.max_retries:
                         raise TimeoutError('UDP retry limit reached')
         except BaseException:
@@ -371,7 +396,7 @@ class ReliableUdpTransport:
             raise
         finally:
             if reserved:
-                cc.discard(size)
+                congestion.discard(size)
                 wake.set()
             self._pending.pop(pending_key, None)
             self._inflight.discard(pending_key)
@@ -403,7 +428,7 @@ class ReliableUdpTransport:
                 if received.packet.seq:
                     state.consumed = received.packet.seq
                     state.packets.pop(state.consumed, None)
-                    self._control(received.peer, received.packet, M.WINDOW_UPDATE,
+                    self._control(received.peer, received.packet, MessageType.WINDOW_UPDATE,
                                   recv_limit=state.consumed + RECEIVE_WINDOW_PACKETS)
                     self._queue_ready(key, state)
                     if key in self._draining:

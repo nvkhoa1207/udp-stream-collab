@@ -362,7 +362,7 @@ class ClientFileReceiveTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep(0)
                 while not self.client._file_queue.full():
                     self.client._file_queue.put_nowait(chunk_packet(self.id, 1))
-                with self.assertRaisesRegex(RuntimeError, "bận"):
+                with self.assertRaisesRegex(RuntimeError, "busy"):
                     await self.client.cancel_receive_file(self.id)
                 self.task.cancel()
                 await asyncio.sleep(0.01)

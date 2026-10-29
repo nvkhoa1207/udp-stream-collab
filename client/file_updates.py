@@ -1,4 +1,4 @@
-"""Snapshot file; lock bảo vệ khi worker đĩa cập nhật và event loop polling."""
+"""Lưu trạng thái file; dùng khóa để đọc và ghi từ hai thread an toàn."""
 
 from threading import Lock
 
@@ -14,7 +14,7 @@ class FileUpdates:
         key = (direction, transfer_id)
         with self._lock:
             if key in self.records or len(self.records) >= self.limit:
-                raise RuntimeError("Cần đọc cập nhật file trước khi mở thêm lượt truyền")
+                raise RuntimeError("Read pending file updates before starting another transfer")
             record = dict(type="file", direction=direction, transfer_id=transfer_id,
                           status="preparing", total_bytes=None, cleanup_pending=False)
             if direction == "send":
@@ -27,7 +27,7 @@ class FileUpdates:
     def update(self, transfer_id, *, direction="send", **changes):
         key = (direction, transfer_id)
         with self._lock:
-            # Phản hồi cache đến muộn không tạo lại snapshot đã được UI đọc.
+            # Không tạo lại trạng thái cũ khi phản hồi lưu sẵn đến muộn.
             if key not in self.records:
                 return
             self.records[key].update(changes)

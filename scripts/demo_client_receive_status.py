@@ -75,7 +75,7 @@ async def main():
             await wait_update(transfer_id, lambda u: u["status"] == "expired")
             timeout_reply = await reply()
             assert json.loads(timeout_reply.payload)["code"] == "FILE_EXPIRED"
-            print("Bên gửi nhận ERROR FILE_EXPIRED qua control.")
+            print("Sender received ERROR FILE_EXPIRED on the control stream.")
 
             transfer_id = uuid4().hex
             await start(transfer_id, dict(metadata, sha256="0" * 64))
@@ -88,8 +88,8 @@ async def main():
             assert not list(receiver.output_directory.glob("*.part"))
             files = list(receiver.output_directory.iterdir())
             assert len(files) == 1 and files[0].read_bytes() == content
-            print("Chỉ file đúng hash được giữ; không còn .part hay quota bị giữ.")
-            print("Demo dùng mock và đồng hồ giả; chưa kiểm thử UDP thật.")
+            print("Only files with a matching hash remain; no .part files or reserved quota.")
+            print("Demo uses mocks and a fake clock; real UDP is not tested here.")
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)

@@ -1,4 +1,4 @@
-"""Schema CANCEL dùng chung ở phía gửi và phía nhận."""
+"""Kiểm tra nội dung gói hủy file cho cả bên gửi và bên nhận."""
 
 import json
 import re

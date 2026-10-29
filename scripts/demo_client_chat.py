@@ -44,7 +44,7 @@ async def main():
     try:
         # Khoa gửi tin đến server.
         await khoa.send_chat(
-            "friend", "Chào bạn, mình là Khoa."
+            "friend", "Hello, I am Khoa."
         )
 
         # Server giả nhận tin.
@@ -55,8 +55,8 @@ async def main():
         packet = received.packet
 
         print(
-            f"Server giả nhận tin từ {packet.sender}, "
-            f"gửi đến {packet.recipient}."
+            f"Mock server received a message from {packet.sender}, "
+            f"sent to {packet.recipient}."
         )
 
         # Chuyển tiếp tới friend trong bài thử này.
@@ -72,11 +72,11 @@ async def main():
             "type": "message",
             "sender": "khoa",
             "recipient": "friend",
-            "text": "Chào bạn, mình là Khoa.",
+            "text": "Hello, I am Khoa.",
         }
 
         print(
-            f"friend nhận từ {event['sender']}: "
+            f"friend received from {event['sender']}: "
             f"{event['text']}"
         )
 

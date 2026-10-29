@@ -1,5 +1,32 @@
 # UI và HTTP bridge — Khoa
 
+## Cập nhật giao diện 29/10/2026
+
+Nhãn, thông báo và lỗi của ứng dụng dùng tiếng Anh. Comment trong code dùng
+tiếng Việt ngắn gọn. HTML/CSS được xuống dòng; JavaScript tách thành các hàm
+đăng nhập, chọn người nhận, hiển thị chat, cập nhật file và lấy sự kiện.
+
+- Desktop hiển thị người online, chat và file cạnh nhau; màn hình nhỏ xếp dọc.
+- Chọn người nhận bằng danh sách nút hoặc ô Recipient, dùng chung cho chat/file.
+- Chat có nhãn Broadcast/Private và bộ đếm byte UTF-8. Enter vẫn xuống dòng;
+  bấm Send message để gửi, giới hạn vẫn là 480 byte.
+- File có tên, dung lượng, phần trăm, trạng thái và nút Cancel. Tối đa 16 MiB,
+  tự nhận như cũ; 100% số byte chưa đồng nghĩa với Completed.
+- Giữ nguyên endpoint, token, CSP, cách polling và dùng textContent để hiển thị.
+  Event file gửi có thêm trường name để hiển thị tên từ metadata đã có;
+  không thay gói tin truyền qua TCP/UDP.
+
+Đọc code theo thứ tự: `index.html` (các khung), `style.css` (bố cục),
+`app.js` (sự kiện trên browser), `bridge.py` (HTTP), `runtime.py` (gọi client).
+Phần gửi UDP tách riêng bước đợi cửa sổ nhận và đợi CUBIC để dễ theo dõi.
+
+Đã kiểm tra bản refactor: 202 test đạt khi bật BTL_NETWORK_TEST, 11 lượt demo
+đạt và JavaScript qua node --check. Hai browser thật đã thử đăng nhập, chat
+hai chiều, Unicode, giới hạn 480 byte, truyền file 1200 byte và hủy ở cả hai
+phía. Bố cục 390 px không tràn ngang; nội dung chứa thẻ HTML vẫn hiện như chữ.
+
+## Chạy ứng dụng
+
 Đã nối HTML/JS với HTTP bridge/core, bỏ fixture. Chạy từ repo:
 
 ```bash

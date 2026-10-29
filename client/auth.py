@@ -1,4 +1,4 @@
-"""TCP HELLO/AUTH và bootstrap BIND; không tự tạo socket UDP thứ hai."""
+"""Đăng nhập qua TCP rồi gửi BIND bằng kết nối UDP có sẵn."""
 import asyncio
 import json
 import re
@@ -14,16 +14,16 @@ async def read_record(reader):
 async def write_record(writer, value):
     body = json.dumps(value).encode('utf-8')
     if len(body) > MAX_TCP_RECORD_BYTES:
-        raise ValueError('Record TCP quá lớn')
+        raise ValueError('TCP record is too large')
     writer.write(len(body).to_bytes(4, 'big') + body)
     await writer.drain()
 
 
 async def authenticate(peer, username, password):
     if type(username) is not str or username == 'server' or re.fullmatch(r'[A-Za-z0-9_-]{1,32}', username) is None:
-        raise ValueError('Username không hợp lệ')
+        raise ValueError('Invalid username')
     if type(password) is not str or not 1 <= len(password) <= 128:
-        raise ValueError('Mật khẩu rỗng hoặc quá dài')
+        raise ValueError('Password is empty or too long')
     async with asyncio.timeout(8):
         reader, writer = await asyncio.open_connection(*peer)
         try:
@@ -32,16 +32,16 @@ async def authenticate(peer, username, password):
             if (set(hello) != {'type', 'version', 'server_name'} or hello['type'] != 'HELLO_ACK'
                     or type(hello['version']) is not int or hello['version'] != 1
                     or type(hello['server_name']) is not str):
-                raise ValueError('HELLO_ACK không hợp lệ')
+                raise ValueError('Invalid HELLO_ACK')
             await write_record(writer, dict(type='AUTH', username=username, password=password))
             response = await read_record(reader)
             if response.get('type') == 'AUTH_ERROR':
-                raise PermissionError('Đăng nhập bị từ chối')
+                raise PermissionError('Login was rejected')
             if (set(response) != {'type', 'session_id', 'udp_port'} or response['type'] != 'AUTH_OK'
                     or type(response['session_id']) is not str
                     or re.fullmatch(r'[0-9a-f]{32}', response['session_id']) is None
                     or type(response['udp_port']) is not int or not 1 <= response['udp_port'] <= 65535):
-                raise ValueError('AUTH_OK không hợp lệ')
+                raise ValueError('Invalid AUTH_OK')
             host = writer.get_extra_info('peername')[0]
             return (host, response['udp_port']), response['session_id']
         finally:
@@ -67,4 +67,4 @@ async def bind_session(transport, peer, username, session_id):
                             return
             except TimeoutError:
                 pass
-    raise TimeoutError('Không nhận được BIND_OK')
+    raise TimeoutError('No BIND_OK received')

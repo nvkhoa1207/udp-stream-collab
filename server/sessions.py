@@ -1,4 +1,4 @@
-"""Quản lý phiên trong RAM; timeout dùng monotonic clock."""
+"""Lưu phiên trong RAM và dùng đồng hồ monotonic để tính thời gian hết hạn."""
 
 import re
 import secrets
@@ -31,10 +31,10 @@ class SessionRegistry:
         max_sessions: int = 100,
     ) -> None:
         if bind_timeout <= 0 or offline_timeout <= 0:
-            raise ValueError("Timeout phải lớn hơn 0")
+            raise ValueError("Timeout must be greater than zero")
 
         if type(max_sessions) is not int or max_sessions < 1:
-            raise ValueError("Giới hạn phiên không hợp lệ")
+            raise ValueError("Invalid session limit")
 
         self._clock = clock
         self._bind_timeout = bind_timeout
@@ -46,15 +46,15 @@ class SessionRegistry:
         if not isinstance(username, str) or username == 'server' or re.fullmatch(
             r"[A-Za-z0-9_-]{1,32}", username
         ) is None:
-            raise ValueError("Username không hợp lệ")
+            raise ValueError("Invalid username")
 
         tcp_ip = str(ip_address(tcp_ip))
 
         if any(s.username == username for s in self._sessions.values()):
-            raise ValueError("Username đang sử dụng")
+            raise ValueError("Username is already in use")
 
         if len(self._sessions) >= self._max_sessions:
-            raise ValueError("Server đã đạt giới hạn phiên")
+            raise ValueError("Server session limit reached")
 
         session_id = secrets.token_hex(16)
         while session_id in self._sessions:
@@ -69,7 +69,7 @@ class SessionRegistry:
     def get(self, session_id: str) -> Session:
         session = self._sessions.get(session_id)
         if session is None:
-            raise ValueError("Phiên không tồn tại")
+            raise ValueError("Session does not exist")
 
         now = self._clock()
         expired = (
@@ -79,7 +79,7 @@ class SessionRegistry:
         )
 
         if expired:
-            raise ValueError("Phiên đã hết hạn")
+            raise ValueError("Session expired")
 
         return session
 
@@ -89,19 +89,19 @@ class SessionRegistry:
         endpoint = (str(ip_address(host)), port)
 
         if type(port) is not int or not 1 <= port <= 65535:
-            raise ValueError("UDP port không hợp lệ")
+            raise ValueError("Invalid UDP port")
 
         if endpoint[0] != session.tcp_ip:
-            raise ValueError("IP UDP không khớp IP TCP")
+            raise ValueError("UDP IP does not match TCP IP")
 
         if session.peer is not None and session.peer != endpoint:
-            raise ValueError("Phiên đã gắn với endpoint khác")
+            raise ValueError("Session is already bound to another endpoint")
 
         if any(
             s.peer == endpoint and s.session_id != session_id
             for s in self._sessions.values()
         ):
-            raise ValueError("Endpoint đang được phiên khác sử dụng")
+            raise ValueError("Endpoint is in use by another session")
 
         self._sessions[session_id] = replace(
             session, peer=endpoint, last_seen=self._clock()
@@ -111,7 +111,7 @@ class SessionRegistry:
         session = self.get(session_id)
 
         if session.peer is None:
-            raise ValueError("Phiên chưa BIND")
+            raise ValueError("Session has not completed BIND")
 
         self._sessions[session_id] = replace(
             session, last_seen=self._clock()
@@ -149,7 +149,7 @@ class SessionRegistry:
         )
 
     def sweep(self) -> list[Session]:
-        """Remove expired sessions and return identities for transport cleanup."""
+        """Xóa phiên hết hạn, trả danh sách để dọn kết nối UDP tương ứng."""
         before = dict(self._sessions)
         self.expire(self._clock())
         return [s for sid, s in before.items() if sid not in self._sessions]

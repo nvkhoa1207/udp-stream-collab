@@ -1,7 +1,99 @@
 <!doctype html>
-<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="client-token" content="{{TOKEN}}"><title>UDP Stream — Client</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
-<body><main><h1>UDP Stream</h1><p id="connection" role="status">Chưa kết nối</p><p id="error" role="alert"></p>
-<section><h2>Kết nối</h2><form id="login"><label>Server<input id="host" value="127.0.0.1" required maxlength="253"></label><label>Cổng TCP<input id="port" type="number" value="9000" min="1" max="65535" required></label><label>Tên đăng nhập<input id="username" pattern="[A-Za-z0-9_-]{1,32}" maxlength="32" autocomplete="username" required></label><label>Mật khẩu<input id="password" type="password" autocomplete="current-password" required></label><button id="login-button">Đăng nhập</button><button id="logout" type="button" disabled>Đăng xuất</button></form></section>
-<section><h2>Trò chuyện</h2><label>Người nhận<select id="recipient" disabled><option value="*">Tất cả</option></select></label><ul id="messages" aria-live="polite"></ul><form id="chat"><label>Tin nhắn<textarea id="text" rows="3" disabled required></textarea></label><small>Tối đa 480 byte UTF-8.</small><button id="send-chat" disabled>Gửi</button></form></section>
-<section><h2>Truyền file</h2><p>Chọn một người nhận riêng. Tối đa 16 MiB. File đến được tự động nhận vào thư mục đã cấu hình.</p><form id="upload"><input id="file" type="file" aria-label="Chọn file" disabled><button id="send-file" disabled>Gửi file</button></form><p id="upload-status" role="status"></p><ul id="files" aria-live="polite"></ul></section>
-<p class="note">Đủ byte chưa phải hoàn tất: cần kiểm tra SHA-256. Kênh hiện chưa có TLS hoặc mã hóa payload.</p></main></body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="client-token" content="{{TOKEN}}">
+  <title>UDP Stream — Client</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header class="page-header">
+      <div>
+        <h1>UDP Stream</h1>
+        <p class="subtitle">Chat and share files on your local network.</p>
+      </div>
+      <p id="connection" class="connection" data-state="offline" role="status">Disconnected</p>
+    </header>
+    <p id="error" role="alert"></p>
+
+    <section class="panel connection-panel" aria-labelledby="connection-heading">
+      <h2 id="connection-heading">Connection</h2>
+      <form id="login">
+        <label>Server
+          <input id="host" value="127.0.0.1" required maxlength="253">
+        </label>
+        <label>TCP port
+          <input id="port" type="number" value="9000" min="1" max="65535" required>
+        </label>
+        <label>Username
+          <input id="username" pattern="[A-Za-z0-9_-]{1,32}" maxlength="32" autocomplete="username" required>
+        </label>
+        <label>Password
+          <input id="password" type="password" autocomplete="current-password" required>
+        </label>
+        <div class="button-group">
+          <button id="login-button" type="submit">Log in</button>
+          <button id="logout" class="secondary" type="button" disabled>Log out</button>
+        </div>
+      </form>
+    </section>
+
+    <div class="workspace">
+      <section class="panel people-panel" aria-labelledby="people-heading">
+        <div class="section-heading">
+          <h2 id="people-heading">Online users</h2>
+          <span id="user-count" class="count">0</span>
+        </div>
+        <p class="hint">Choose who receives your messages and files.</p>
+        <label>Recipient
+          <select id="recipient" disabled><option value="*">Everyone</option></select>
+        </label>
+        <ul id="user-list" aria-label="Online users"></ul>
+        <p class="hint">Everyone sends a chat message to all other online users.</p>
+      </section>
+
+      <section class="panel chat-panel" aria-labelledby="chat-heading">
+        <div class="section-heading">
+          <h2 id="chat-heading">Chat</h2>
+          <span id="chat-recipient" class="badge">To everyone</span>
+        </div>
+        <ul id="messages" aria-live="polite" aria-label="Messages"></ul>
+        <form id="chat">
+          <label>Message
+            <textarea id="text" rows="3" disabled required aria-describedby="byte-count"></textarea>
+          </label>
+          <div class="composer-footer">
+            <small id="byte-count">0 / 480 UTF-8 bytes</small>
+            <button id="send-chat" type="submit" disabled>Send message</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel file-panel" aria-labelledby="file-heading">
+        <h2 id="file-heading">File transfers</h2>
+        <p id="file-recipient" class="recipient-hint">Choose one recipient to send a file.</p>
+        <p class="hint">Up to 16 MiB per file. Incoming files are saved automatically to your configured folder.</p>
+        <form id="upload">
+          <div>
+            <span class="field-label">File</span>
+            <label class="file-picker">
+              <span class="file-picker-button">Choose file</span>
+              <span id="selected-file">No file selected</span>
+              <input id="file" type="file" aria-label="Choose file" disabled>
+            </label>
+          </div>
+          <button id="send-file" type="submit" disabled>Send file</button>
+        </form>
+        <p id="upload-status" class="hint" role="status"></p>
+        <ul id="files" aria-live="polite" aria-label="File transfers"></ul>
+      </section>
+    </div>
+    <footer class="note">
+      A transfer is complete after its SHA-256 check succeeds. This version does not use TLS or payload encryption.
+    </footer>
+  </main>
+</body>
+</html>

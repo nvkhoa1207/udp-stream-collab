@@ -38,19 +38,19 @@ async def main():
             return reply.packet
 
         try:
-            print("Server giả chuyển FILE_META từ Hải tới Khoa.")
+            print("Mock server forwards FILE_META from Hai to Khoa.")
             reply = await send_meta(metadata, transfer_id)
             assert reply.kind == MessageType.FILE_ACCEPT
             assert reply.recipient == "hai" and reply.stream_id == transfer_id
             assert (receiver.output_directory / f"{transfer_id}.part").exists()
-            print("Khoa đã tạo .part, trả FILE_ACCEPT qua server về Hải.")
-            print("Dung lượng đã dành:", receiver.reserved_bytes, "byte")
+            print("Khoa created a .part file and sent FILE_ACCEPT to Hai through the server.")
+            print("Reserved bytes:", receiver.reserved_bytes, "byte")
 
             reply = await send_meta(dict(metadata, name="../bad.txt"), uuid4().hex)
             assert reply.kind == MessageType.ERROR
-            print("Tên file không hợp lệ ->", json.loads(reply.payload)["code"])
+            print("Invalid file name ->", json.loads(reply.payload)["code"])
             assert list(receiver.transfers) == [transfer_id]
-            print("Lượt nhận hợp lệ trước đó vẫn được giữ.")
+            print("The earlier valid incoming transfer is preserved.")
         finally:
             receive_task.cancel()
             try:
@@ -62,7 +62,7 @@ async def main():
 
         assert receiver.reserved_bytes == 0
         assert not list(receiver.output_directory.glob("*.part"))
-        print("Dừng client: đã dọn .part và trả quota. Chưa gửi CHUNK/END.")
+        print("Client stopped: .part removed and quota released. CHUNK/END were not sent.")
 
 
 if __name__ == "__main__":

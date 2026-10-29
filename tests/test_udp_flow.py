@@ -52,7 +52,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.limit, limit)
 
     async def test_quota_zero_window_stall_and_recovery(self):
-        self.b.max_streams = 2  # control + one data stream
+        self.b.max_streams = 2  # Một luồng điều khiển và một luồng dữ liệu.
         await self.a.send(self.b.local_address, replace(self.packet, stream_id='first'))
         await self.b.receive()
         blocked = asyncio.create_task(self.a.send(self.b.local_address, replace(self.packet, stream_id='second')))
@@ -78,7 +78,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(TimeoutError):
             await asyncio.wait_for(self.b.receive(), 0.03)
         self.assertEqual(len(self.b._rx), 1)
-        # A full history never evicts a live tombstone to admit another stream.
+        # Khi lịch sử đầy, không xóa dấu luồng cũ chỉ để nhận thêm luồng mới.
         for i in range(4096 - 140):
             self.b._tombstones[(self.a.local_address, f'old{i}')] = (0, False)
         self.assertFalse(self.b._can_reserve(self.a.local_address, 'fresh'))

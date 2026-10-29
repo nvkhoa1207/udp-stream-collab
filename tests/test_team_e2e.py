@@ -1,4 +1,4 @@
-"""Real team client + server TCP/UDP; every output lives in a temporary directory."""
+"""Thử client và server TCP/UDP thật; tất cả file đầu ra nằm trong thư mục tạm."""
 import asyncio
 import os
 import tempfile
@@ -128,8 +128,8 @@ class TeamE2ETests(unittest.IsolatedAsyncioTestCase):
         await self.transfer(a, b, 1024, 'after-cancel.bin')
 
     async def test_one_mebibyte_real_file(self):
-        # Match normal app execution; asyncio's per-callback debug instrumentation
-        # drastically changes throughput of tens of thousands of UDP callbacks.
+        # Tắt chế độ debug để đo giống lúc chạy ứng dụng bình thường.
+        # Debug từng lần nhận UDP làm kết quả tốc độ bị chậm đi nhiều.
         asyncio.get_running_loop().set_debug(False)
         a, b = await self.client('hai'), await self.client('khoa')
         await self.transfer(a, b, 1024 * 1024, 'one-MiB.bin')
@@ -182,7 +182,7 @@ class TeamE2ETests(unittest.IsolatedAsyncioTestCase):
         await asyncio.to_thread(path.write_bytes, os.urandom(1024*1024))
         sending = asyncio.create_task(a.send_file('khoa', path))
         await until(lambda: bool(b.file_offers.receiver.transfers))
-        await a.transport.close()  # abrupt loss: no LOGOUT or network CANCEL
+        await a.transport.close()  # Mất kết nối đột ngột, không gửi LOGOUT hay CANCEL.
         now[0] = 9
         self.app.sessions.touch(b.session_id)
         now[0] = 11
@@ -224,8 +224,8 @@ class TeamE2ETests(unittest.IsolatedAsyncioTestCase):
         from common.models import MessageType as M, Packet
         a, b, c = [await self.client(name) for name in ('hai', 'khoa', 'third')]
         packet = Packet(kind=M.MSG, sender='hai', recipient='*', stream_id='chat-*', payload=b'independent')
-        # Deterministically model one full downstream queue; DATA to the other
-        # destination and the error response still cross real UDP sockets.
+        # Giả lập một hàng đợi đầy để kết quả thử ổn định.
+        # Gói đến người còn lại và phản hồi lỗi vẫn đi qua UDP thật.
         key = (b.transport.local_address, self.app.router._stream(packet))
         blocked = asyncio.Queue(maxsize=1)
         blocked.put_nowait(None)

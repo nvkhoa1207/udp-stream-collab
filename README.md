@@ -11,6 +11,11 @@ truyền file tin cậy qua UDP trong mạng LAN.
 **Định hướng:** làm đơn giản, bám đề và phản hồi giảng viên; ưu tiên chạy đúng,
 kiểm thử được và giải thích được code.
 
+Giao diện và thông báo chương trình dùng **tiếng Anh**; comment giải thích bằng
+**tiếng Việt**. Code UI đã tách hàm và định dạng lại để dễ đọc, xem
+[hướng dẫn UI](ui/README.md). Các luồng đăng nhập, chat, tự nhận/hủy file và
+thuật toán truyền UDP giữ nguyên.
+
 > **Đã ghép ứng dụng mạng thật.** TCP login, UDP chat/file, Selective Repeat,
 > flow control, CUBIC rút gọn và HTTP/UI đã chạy trên Windows loopback.
 > 20 client, file tới 16 MiB, 140 file nối tiếp và fault injection đã có kết quả.

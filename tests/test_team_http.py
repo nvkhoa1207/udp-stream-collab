@@ -1,4 +1,4 @@
-"""Two actual localhost bridges against the team's actual TCP/UDP server."""
+"""Thử hai HTTP bridge trên localhost với server TCP/UDP thật của nhóm."""
 import asyncio
 import http.client
 import json
@@ -61,7 +61,8 @@ class TeamHttpTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await asyncio.to_thread(files[0].read_bytes), data)
             events = await request(0, 'GET', '/api/events?after=0')
             self.assertTrue(events['connected'])
-            self.assertTrue(any(e.get('status') == 'completed' for e in events['events']))
+            completed = next(e for e in events['events'] if e.get('status') == 'completed')
+            self.assertEqual(completed['name'], 'http.bin')
             self.assertFalse((await request(0, 'POST', '/api/logout', {}))['connected'])
         finally:
             for runtime in runtimes:

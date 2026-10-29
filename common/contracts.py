@@ -1,4 +1,4 @@
-"""Khoa và A cùng dựa vào API này để phát triển độc lập."""
+"""Các hàm gửi nhận mà transport thật và mock đều cần có."""
 
 from typing import Protocol
 
@@ -11,17 +11,17 @@ class Transport(Protocol):
         ...
 
     async def send(self, peer: Peer, packet: Packet) -> None:
-        """Real: đợi ACK chặng kế tiếp hoặc raise lỗi; mock: chỉ đưa vào queue."""
+        """Bản thật đợi ACK hoặc báo lỗi; bản mock chỉ đưa gói vào hàng đợi."""
         ...
 
     async def receive(self) -> ReceivedPacket:
-        """Real: kiểm tra session/endpoint, dedup/order; trả gói và nhả slot nhận.
+        """Kiểm tra phiên, bỏ gói trùng và trả gói đúng thứ tự cho ứng dụng.
 
-        Caller giữ backpressure bằng queue/task hữu hạn; không có release().
-        Kiểm tra phiên không đồng nghĩa với xác thực packet bằng mật mã.
+        Khi lấy gói ra thì bộ đệm nhận có thêm chỗ. Phía gọi cũng cần giới hạn
+        hàng đợi của mình. Việc kiểm tra phiên không thay cho xác thực bằng mật mã.
         """
         ...
 
     async def close(self) -> None:
-        """Đóng transport; caller hủy task receive đang chờ khi shutdown."""
+        """Đóng kết nối; phía gọi hủy tác vụ receive đang chờ khi dừng chương trình."""
         ...

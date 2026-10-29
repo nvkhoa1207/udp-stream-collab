@@ -1,4 +1,4 @@
-"""TCP authentication and optional reliable UDP relay with bounded lifecycle."""
+"""Server nhận đăng nhập qua TCP và chuyển tiếp chat, file qua UDP."""
 
 import asyncio
 import logging
@@ -29,13 +29,13 @@ class ServerApp:
         enable_udp: bool = False,
     ) -> None:
         if type(tcp_port) is not int or not 0 <= tcp_port <= 65535:
-            raise ValueError("Cổng TCP không hợp lệ")
+            raise ValueError("Invalid TCP port")
 
         if handshake_timeout <= 0 or max_clients <= 0:
-            raise ValueError("Timeout và giới hạn client phải dương")
+            raise ValueError("Timeout and client limit must be positive")
 
         if type(udp_port) is not int or not 0 <= udp_port <= 65535:
-            raise ValueError("Cổng UDP không hợp lệ")
+            raise ValueError("Invalid UDP port")
 
         self.auth = auth if auth is not None else AuthService()
         self.sessions = sessions if sessions is not None else SessionRegistry()
@@ -61,14 +61,14 @@ class ServerApp:
     @property
     def address(self) -> tuple[str, int]:
         if self._server is None:
-            raise RuntimeError("Server chưa được khởi động")
+            raise RuntimeError("Server has not started")
 
         host, port = self._server.sockets[0].getsockname()[:2]
         return host, port
 
     async def start(self) -> None:
         if self._server is not None:
-            raise RuntimeError("Server đã được khởi động")
+            raise RuntimeError("Server has already started")
 
         if self.transport is not None:
             await self.transport.start()
@@ -85,7 +85,7 @@ class ServerApp:
         self._maintenance_task = asyncio.create_task(self._maintenance())
 
         logger.info(
-            "TCP handshake server đang nghe tại %s:%s",
+            "TCP handshake server listening on %s:%s",
             *self.address,
         )
 
@@ -129,7 +129,7 @@ class ServerApp:
             )
 
             if not valid:
-                raise ValueError("Record HELLO không hợp lệ")
+                raise ValueError("Invalid HELLO record")
 
             response = {
                 "type": "HELLO_ACK",
@@ -152,7 +152,7 @@ class ServerApp:
             TimeoutError,
             OSError,
         ):
-            logger.debug("Handshake lỗi hoặc client đã ngắt kết nối")
+            logger.debug("Handshake failed or client disconnected")
 
         finally:
             writer.close()
@@ -189,7 +189,7 @@ class ServerApp:
                 response = {
                     "type": "AUTH_ERROR",
                     "code": "BAD_AUTH",
-                    "message": "Record AUTH không hợp lệ",
+                    "message": "Invalid AUTH record",
                 }
 
             elif not await self.auth.verify(
@@ -198,7 +198,7 @@ class ServerApp:
                 response = {
                     "type": "AUTH_ERROR",
                     "code": "INVALID_CREDENTIALS",
-                    "message": "Sai tài khoản hoặc mật khẩu",
+                    "message": "Invalid username or password",
                 }
 
             else:
@@ -212,7 +212,7 @@ class ServerApp:
                     response = {
                         "type": "AUTH_ERROR",
                         "code": "SESSION_UNAVAILABLE",
-                        "message": "Tài khoản đang sử dụng hoặc server đầy",
+                        "message": "Username is in use or server is full",
                     }
                 else:
                     response = {

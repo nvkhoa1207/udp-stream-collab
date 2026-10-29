@@ -22,7 +22,7 @@ def main() -> None:
         "--udp-port",
         type=int,
         default=UDP_PORT,
-        help="Cổng UDP chat/file",
+        help="UDP port for chat and files",
     )
 
     args = parser.parse_args()
@@ -31,7 +31,7 @@ def main() -> None:
         1 <= port <= 65535
         for port in (args.tcp_port, args.udp_port)
     ):
-        parser.error("Cổng phải từ 1 đến 65535")
+        parser.error("Ports must be between 1 and 65535")
 
     logging.basicConfig(
         level=logging.INFO,
@@ -43,7 +43,7 @@ def main() -> None:
 
         for username in ("hai", "khoa"):
             password = getpass.getpass(
-                f"Mật khẩu demo cho {username}: "
+                f"Demo password for {username}: "
             )
             auth.add_user(username, password)
             del password
@@ -61,7 +61,7 @@ def main() -> None:
         pass
 
     except (OSError, ValueError) as exc:
-        parser.exit(1, f"Không thể chạy server: {exc}\n")
+        parser.exit(1, f"Could not start server: {exc}\n")
 
 
 if __name__ == "__main__":

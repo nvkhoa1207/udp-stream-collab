@@ -279,7 +279,7 @@ class ClientFileSendTests(unittest.IsolatedAsyncioTestCase):
         meta = await self.outgoing()
         self.path.write_bytes(b"changed")
         await self.reply(meta, MessageType.FILE_ACCEPT)
-        with self.assertRaisesRegex(ValueError, "thay đổi"):
+        with self.assertRaisesRegex(ValueError, "changed"):
             await asyncio.wait_for(task, timeout=1)
         while not self.server._queue.empty():
             self.assertNotEqual((await self.outgoing()).kind, MessageType.FILE_END)
@@ -401,7 +401,7 @@ class ClientFileSendTests(unittest.IsolatedAsyncioTestCase):
         with patch("client.file_sender.MAX_SEND_FILE_BYTES", 1):
             with self.assertRaises(ValueError):
                 await self.client.send_file("hai", self.path)
-        with self.assertRaisesRegex(RuntimeError, "cập nhật"):
+        with self.assertRaisesRegex(RuntimeError, "updates"):
             await self.client.send_file("hai", self.path)
         self.assertTrue(self.server._queue.empty())
         self.assertEqual(self.client.poll_file_updates()[0]["status"], "failed")

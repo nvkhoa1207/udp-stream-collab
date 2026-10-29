@@ -1,1 +1,1 @@
-"""BTL collaboration starter package."""
+"""Các module dùng trong bài tập lớn."""

@@ -1,4 +1,4 @@
-"""Run legacy demos in disposable directories, preserving the user's data/."""
+"""Chạy demo trong thư mục tạm để không sửa dữ liệu có sẵn."""
 import os
 import subprocess
 import sys

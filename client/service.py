@@ -1,4 +1,4 @@
-"""Owner Khoa. Tách nghiệp vụ khỏi UI và socket."""
+"""Xử lý đăng nhập, chat và truyền file ở phía client."""
 
 import asyncio
 import re
@@ -69,7 +69,7 @@ class ClientService:
 
     async def login(self, password: str) -> None:
         if self.tcp_peer is None or self._login_attempted or self._receive_started:
-            raise RuntimeError("Cần client mới với tcp_peer để đăng nhập")
+            raise RuntimeError("Login requires a new client with tcp_peer configured")
         self._login_attempted = True
         try:
             await self.transport.start()
@@ -127,7 +127,7 @@ class ClientService:
 
     def _check_session(self):
         if self.tcp_peer is not None and self.session_id is None:
-            raise ConnectionError("Client chưa đăng nhập/BIND hoặc phiên đã dừng")
+            raise ConnectionError("Client is not logged in and bound, or the session has ended")
 
     async def send_chat(self, recipient: str, text: str) -> None:
         self._check_session()
@@ -135,17 +135,17 @@ class ClientService:
 
         if not recipient or len(recipient) > 32:
             raise ValueError(
-                "Tên người nhận phải có từ 1 đến 32 ký tự"
+                "Recipient name must contain 1 to 32 characters"
             )
 
         if not text.strip():
-            raise ValueError("Tin nhắn không được để trống")
+            raise ValueError("Message must not be empty")
 
         payload = text.encode("utf-8")
 
         if len(payload) > MAX_PAYLOAD_BYTES:
             raise ValueError(
-                f"Tin nhắn tối đa {MAX_PAYLOAD_BYTES} byte"
+                f"Message limit: {MAX_PAYLOAD_BYTES} byte"
             )
 
         packet = Packet(
@@ -159,16 +159,16 @@ class ClientService:
         await self.transport.send(self.server_peer, packet)
 
     async def send_file(self, recipient: str, path: Path) -> None:
-        """Chờ tới COMPLETE đúng size/hash; lỗi/timeout/hủy được trả về caller."""
+        """Đợi COMPLETE đúng kích thước và hash; báo lỗi nếu thất bại hoặc bị hủy."""
         self._check_session()
         if type(recipient) is not str or re.fullmatch(r"[A-Za-z0-9_-]{1,32}", recipient) is None:
-            raise ValueError("File phải gửi riêng tới một username hợp lệ")
+            raise ValueError("Files must be sent to one valid username")
         if not self._receiving:
-            raise RuntimeError("Cần chạy receive_events trước khi gửi file")
+            raise RuntimeError("Start receive_events before sending a file")
         if self._file_sender is not None:
-            raise RuntimeError("Mỗi client chỉ gửi một file tại một thời điểm")
+            raise RuntimeError("Each client can send one file at a time")
         if self._sent_file_count >= 4096:
-            raise RuntimeError("Đã hết quota lượt gửi; cần tạo phiên mới")
+            raise RuntimeError("Send quota reached; reconnect to continue")
         sender = FileSender(self.transport, self.server_peer, self.username, recipient,
                             self._file_io, self.file_updates)
         self.file_updates.begin(sender.transfer_id, recipient)
@@ -181,7 +181,7 @@ class ClientService:
             self._file_sender = None
 
     def poll_file_updates(self) -> list[dict]:
-        """Lấy snapshot mới nhất; gọi trên event loop của client, như bridge sau này."""
+        """Lấy các trạng thái file mới nhất trên vòng xử lý của client."""
         return self.file_updates.poll()
 
     async def cancel_file(self, transfer_id: str) -> bool:
@@ -195,7 +195,7 @@ class ClientService:
     async def receive_events(self) -> None:
         """Chạy một lần mỗi ClientService/phiên; hủy task này để dọn file đang nhận."""
         if self._receive_started:
-            raise RuntimeError("Mỗi phiên chỉ chạy một vòng receive_events")
+            raise RuntimeError("Only one receive_events loop is allowed per session")
         self._receive_started = True
         self._receiving = True
         try:
@@ -205,24 +205,24 @@ class ClientService:
         finally:
             self._receiving = False
             if self._file_sender is not None:
-                self._file_sender.fail(ConnectionError("Vòng nhận đã dừng khi đang gửi file"))
+                self._file_sender.fail(ConnectionError("Receive loop stopped during file transfer"))
 
     async def cancel_receive_file(self, transfer_id: str) -> bool:
-        """True: worker đã xử lý yêu cầu; xem snapshot để biết cleanup/gửi CANCEL."""
+        """Trả True khi đã xử lý yêu cầu; trạng thái file cho biết kết quả dọn và báo hủy."""
         if type(transfer_id) is not str or re.fullmatch(r"[0-9a-f]{32}", transfer_id) is None:
-            raise ValueError("Transfer ID không hợp lệ")
+            raise ValueError("Invalid transfer ID")
         if not self._receiving or not self._file_worker_running:
-            raise RuntimeError("Vòng nhận chưa chạy hoặc đã dừng")
+            raise RuntimeError("Receive loop has not started or has stopped")
         result = asyncio.get_running_loop().create_future()
         try:
             self._file_queue.put_nowait(ReceiveCancel(transfer_id, result))
         except asyncio.QueueFull:
-            raise RuntimeError("Worker nhận đang bận; hãy thử hủy lại") from None
+            raise RuntimeError("Receive worker is busy; retry cancellation") from None
         return await result
 
     async def _cancel_receive(self, request: ReceiveCancel):
         if request.result.cancelled():
-            return  # Caller bỏ yêu cầu trước khi worker bắt đầu.
+            return  # Yêu cầu đã bị hủy trước khi được xử lý.
         reply = await self._file_io(self.file_offers.cancel_local, request.transfer_id)
         if reply is None:
             if not request.result.done():
@@ -234,7 +234,7 @@ class ClientService:
                                    timeout=LOCAL_CANCEL_TIMEOUT_SECONDS)
             delivery = "sent_to_server"
         except Exception:
-            pass  # Snapshot báo gửi hủy lỗi; không làm dừng các lượt nhận khác.
+            pass  # Trạng thái file sẽ báo lỗi gửi hủy. Các lượt nhận khác vẫn tiếp tục.
         finally:
             await self._file_io(self.file_offers.note_local_cancel, request.transfer_id, delivery)
             self._finish_stream(request.transfer_id, False)
@@ -242,8 +242,8 @@ class ClientService:
             request.result.set_result(True)
 
     async def _file_io(self, function, *args):
-        # Hủy coroutine không tự dừng thread. Chờ thao tác đĩa kết thúc trước
-        # khi worker chuyển sang close(), tránh begin() tạo .part sau cleanup.
+        # Hủy tác vụ không tự dừng thread đang ghi đĩa. Đợi nó xong trước
+        # khi dọn file, tránh tạo thêm .part sau khi đã dọn.
         work = asyncio.create_task(asyncio.to_thread(function, *args))
         try:
             return await asyncio.shield(work)
@@ -269,7 +269,7 @@ class ClientService:
                             await self._cancel_receive(packet)
                         finally:
                             if not packet.result.done():
-                                packet.result.set_exception(ConnectionError("Worker dừng khi đang xử lý hủy"))
+                                packet.result.set_exception(ConnectionError("Worker stopped while processing cancellation"))
                         continue
                     reply = await self._file_io(self.file_offers.handle, packet)
                     await self._send_file_notifications()
@@ -296,14 +296,14 @@ class ClientService:
                     self._file_queue.task_done()
         finally:
             self._file_worker_running = False
-            # Lỗi gửi phản hồi/cleanup được truyền về caller, không báo thành công.
+            # Báo lại lỗi gửi phản hồi hoặc dọn file cho nơi gọi.
             try:
                 await self._file_io(self.file_offers.close)
             finally:
                 while not self._file_queue.empty():
                     pending = self._file_queue.get_nowait()
                     if isinstance(pending, ReceiveCancel) and not pending.result.done():
-                        pending.result.set_exception(ConnectionError("Worker đã dừng trước khi xử lý hủy"))
+                        pending.result.set_exception(ConnectionError("Worker stopped before processing cancellation"))
                     self._file_queue.task_done()
 
     async def _send_file_notifications(self) -> None:
@@ -366,7 +366,7 @@ class ClientService:
                 except UnicodeDecodeError:
                     await self.events.put({
                         "type": "error",
-                        "message": "Tin nhắn nhận được không đúng UTF-8",
+                        "message": "Received message is not valid UTF-8",
                     })
                     continue
 

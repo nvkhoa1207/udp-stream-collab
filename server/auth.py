@@ -18,8 +18,8 @@ class PasswordRecord:
 class AuthService:
     def __init__(self) -> None:
         self._accounts: dict[str, PasswordRecord] = {}
-        # A random dummy digest needs no expensive hash during event-loop construction;
-        # unknown usernames still perform the full PBKDF2 verification in a thread.
+        # Tạo mẫu giả nhanh khi khởi động. Tài khoản không tồn tại vẫn được
+        # tính PBKDF2 trong thread khi kiểm tra mật khẩu.
         self._dummy = PasswordRecord(secrets.token_bytes(16), secrets.token_bytes(32), 600_000)
 
     @staticmethod
@@ -43,10 +43,10 @@ class AuthService:
 
     def add_user(self, username: str, password: str) -> None:
         if not self._valid_credentials(username, password):
-            raise ValueError("Tên tài khoản hoặc mật khẩu không hợp lệ")
+            raise ValueError("Invalid username or password")
 
         if username in self._accounts:
-            raise ValueError("Tài khoản đã tồn tại")
+            raise ValueError("Account already exists")
 
         self._accounts[username] = self._make_record(password)
 
