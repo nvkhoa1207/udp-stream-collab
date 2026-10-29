@@ -74,3 +74,26 @@ dòng điểm riêng. Không dùng bảng này để suy ra chắc chắn 10/10.
 Chi tiết giới hạn và môi trường ở reports/HAI_REPORT.md. Số đo là một lần chạy,
 seed không cố định lịch OS; chưa phải percentile hay số liệu LAN. Screenshot
 browser là output local ngoài Git; báo cáo Khoa được giữ nguyên như bàn giao.
+
+
+## Regression cho review f75894c — 29/10/2026
+
+- Toàn bộ 208 test đạt với BTL_NETWORK_TEST=1 trên Windows (128,215 giây).
+- R1: 20 client, 2 vòng x 380 tin riêng; đúng người nhận, không trùng,
+  server giữ 40 stream nhận; file sau chat đúng nội dung; logout thu hồi peer.
+- R2: CANCEL lặp sau COMPLETE/CLOSED giữ nguyên file, phiên và heartbeat;
+  chat và file tiếp theo vẫn thành công. Test mất ACK COMPLETE cũ vẫn đạt.
+- R3: bỏ BIND_OK đầu tiên, USER_LIST vẫn đầy đủ; thử cả 20 người/nhiều trang;
+  kiểm tra chat đến sớm và giới hạn 100 gói chờ bootstrap.
+- R4: thử vòng nhận bị hủy và server dừng tới heartbeat timeout; login lại
+  trong cùng runtime dọn transport/task cũ, chat lại được. Trường hợp vòng
+  nhận bị hủy còn kiểm tra truyền file sau reconnect. Chưa thử lại thao tác
+  browser khi server mất kết nối trong đợt sửa này.
+- Fault test: 3 client, 64 KiB, 2 file nối tiếp, loss 7%, delay 6 ms, seed 7:
+  PASS 7,674 giây; 0 pending, 0 relay transfer/failure. Đây là loopback,
+  không phải kết quả LAN hay netem.
+
+Một lượt chạy trước có timeout ở test hủy file cũ khi đợi dọn file (5 giây).
+Bộ E2E lúc đó bị nạp hai lần do import trong file test mới; đã sửa import,
+không tăng timeout và không bỏ assertion. Lượt full suite sau đó đạt.
+Test hủy file được chạy riêng thêm 3 lần liên tiếp: đều đạt (6,365 giây tổng cộng).

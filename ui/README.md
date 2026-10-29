@@ -27,6 +27,10 @@ phía. Bố cục 390 px không tràn ngang; nội dung chứa thẻ HTML vẫn 
 
 ## Chạy ứng dụng
 
+Nếu phiên bị ngắt hoặc server mất kết nối, bấm Log in sau khi server hoạt động
+trở lại. Runtime sẽ dọn phiên cũ trước khi tạo phiên mới; không cần khởi động
+lại client Python hay bấm Logout đang bị khóa. Phiên còn kết nối vẫn cần Log out.
+
 Đã nối HTML/JS với HTTP bridge/core, bỏ fixture. Chạy từ repo:
 
 ```bash

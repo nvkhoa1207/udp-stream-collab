@@ -261,7 +261,9 @@ gốc; sender đối chiếu người gửi/transfer_id rồi dừng, không g�
 có thể vượt META vì khác stream: giữ ID đã hủy tới hết phiên (trong quota 4096),
 META muộn không được tạo file. Lỗi FILE_CANCELLED được cache 120s như lỗi file
 khác; CANCEL lặp không kéo dài cache. Nếu đã COMPLETE, giữ nguyên file cuối và
-có thể trả lại COMPLETE đang cache. CANCEL sai schema không thay đổi state;
+bỏ qua CANCEL đến muộn, không gửi COMPLETE mới trên stream đã đóng.
+COMPLETE đang chờ ACK vẫn do transport gửi lại như bình thường.
+CANCEL sai schema không thay đổi state;
 khác chủ trả FILE_SENDER_MISMATCH. Lỗi dọn file giữ quota để expire/close thử lại.
 
 Kiểm thử đầu-cuối qua mạng, HTTP/UI và xử lý stream/ACK của transport vẫn chưa
@@ -306,3 +308,17 @@ CUBIC rút gọn C=.4, beta=.7, mss quy đổi 1200 byte, cwnd ban đầu 9600 b
 trần 307200 byte, sàn sau loss 2400 byte. ACK tăng theo target cubic với Reno floor;
 loss dùng RTO và giảm một lần mỗi recovery flight. Không có HyStart++, ECN, fast
 convergence hay khôi phục spurious loss; không phải triển khai đầy đủ RFC 9438.
+
+
+### Sửa các tình huống biên R1–R4 (29/10/2026)
+
+- Client dùng một stream `chat-messages` cho mọi người nhận. Server dùng một
+  stream chat theo người gửi ở mỗi đích. Hai vòng chat đủ 380 cặp chỉ dùng
+  20 control + 20 chat ở server, không tạo thêm stream theo từng cặp.
+  Chat cùng người gửi dùng chung thứ tự; file vẫn có stream riêng. Stream chat
+  được giữ tới logout/timeout để giữ sequence và chống trùng, quota vẫn là 128.
+- Khi chờ BIND_OK, giữ tối đa 100 gói nghiệp vụ hợp lệ. Sau BIND, vòng nhận
+  xử lý các gói này trước gói mới. Quá giới hạn thì login thất bại và đóng UDP.
+- CANCEL hợp lệ sau COMPLETE không gửi lại DATA mới, không đổi file đã lưu.
+- Login từ UI khi phiên đã kết thúc sẽ đợi dọn task, socket và file tạm của
+  client cũ rồi mới tạo client mới. Phiên đang kết nối vẫn phải logout trước.

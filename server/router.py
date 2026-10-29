@@ -37,7 +37,8 @@ class Router:
     @staticmethod
     def _stream(packet):
         if packet.kind == MessageType.MSG:
-            return 'chat-' + hashlib.sha256((packet.sender + ':' + packet.stream_id).encode()).hexdigest()[:48]
+            # Mỗi người gửi chỉ chiếm một luồng chat ở mỗi người nhận.
+            return 'chat-' + hashlib.sha256(packet.sender.encode()).hexdigest()[:48]
         return packet.stream_id
 
     def can_accept(self, received):

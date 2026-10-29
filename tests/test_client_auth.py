@@ -8,6 +8,21 @@ from common.models import Packet, MessageType, ReceivedPacket
 
 
 class AuthTests(unittest.IsolatedAsyncioTestCase):
+    async def test_bind_preserves_early_chat_and_bounds_pending_packets(self):
+        peer = ('127.0.0.1', 9001)
+        chat = ReceivedPacket(peer, Packet(
+            kind=MessageType.MSG, sender='hai', recipient='khoa',
+            stream_id='chat-hai', session_id='a' * 32, payload=b'early chat'))
+        bound = ReceivedPacket(peer, Packet(
+            kind=MessageType.BIND_OK, sender='server', recipient='khoa',
+            stream_id='control', session_id='a' * 32))
+        transport = AsyncMock()
+        transport.receive.side_effect = [chat, bound]
+        self.assertEqual(await bind_session(transport, peer, 'khoa', 'a' * 32), [chat])
+        transport.receive.side_effect = [chat] * 101
+        with self.assertRaisesRegex(ValueError, 'buffer is full'):
+            await bind_session(transport, peer, 'khoa', 'a' * 32)
+
     async def test_fragmented_and_truncated_records(self):
         body = json.dumps({'type': 'HELLO_ACK'}).encode()
         reader = asyncio.StreamReader()
@@ -58,6 +73,7 @@ class AuthTests(unittest.IsolatedAsyncioTestCase):
         client.receive_events = receive
         async def bind(*args):
             transport.register_peer.assert_called_once_with(('127.0.0.1', 9002), 'a' * 32)
+            return []
         with patch('client.service.authenticate', AsyncMock(return_value=(('127.0.0.1', 9002), 'a' * 32))), patch('client.service.bind_session', bind):
             await client.login('secret')
             self.assertEqual(client.session_id, 'a' * 32)

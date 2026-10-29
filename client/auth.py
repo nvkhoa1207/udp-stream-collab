@@ -50,6 +50,7 @@ async def authenticate(peer, username, password):
 
 
 async def bind_session(transport, peer, username, session_id):
+    pending = []
     packet = Packet(kind=MessageType.BIND, sender=username, recipient='server',
                     stream_id='control', session_id=session_id)
     async with asyncio.timeout(9):
@@ -64,7 +65,16 @@ async def bind_session(transport, peer, username, session_id):
                                 and reply.sender == 'server' and reply.recipient == username
                                 and reply.session_id == session_id and reply.stream_id == 'control'
                                 and reply.seq == 0 and reply.payload == b'' and reply.chunk_index is None):
-                            return
+                            return pending
+                        # USER_LIST/chat có thể đến trước BIND_OK. Giữ lại để
+                        # vòng nhận chính xử lý, nhưng không giữ vô hạn.
+                        if (received.peer != peer or reply.session_id != session_id
+                                or reply.recipient not in (username, '*')
+                                or reply.kind in (MessageType.BIND, MessageType.BIND_OK, MessageType.HEARTBEAT)):
+                            continue
+                        if len(pending) >= 100:
+                            raise ValueError('Bootstrap packet buffer is full')
+                        pending.append(received)
             except TimeoutError:
                 pass
     raise TimeoutError('No BIND_OK received')

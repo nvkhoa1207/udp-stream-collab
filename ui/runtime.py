@@ -41,10 +41,14 @@ class ClientRuntime:
                 self.emit(event)
             await asyncio.sleep(0.1)
             if client.session_id is None:
-                self.emit(dict(type='error', message='Session ended; log out and log in again.'))
+                self.emit(dict(type='error', message='Session ended; log in again to reconnect.'))
                 return
 
     async def login(self, body):
+        # Phiên đã dừng vẫn còn socket/job cần dọn. Login chạy ngoài collector
+        # nên close() có thể hủy và đợi collector an toàn.
+        if self.client is not None and self.client.session_id is None:
+            await self.close()
         if self.client is not None:
             raise ValueError('Log out of the current session first')
         host, port, username = body['host'], body['port'], body['username']

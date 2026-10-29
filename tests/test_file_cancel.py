@@ -61,7 +61,8 @@ class FileCancelTests(unittest.TestCase):
         completed = self.handler.handle(end_packet(self.id))
         result = self.handler.handle(cancel_packet(self.id, sender="other"))
         self.assertEqual(json.loads(result.payload)["code"], "FILE_SENDER_MISMATCH")
-        self.assertEqual(self.handler.handle(cancel_packet(self.id)), completed)
+        self.assertIsNone(self.handler.handle(cancel_packet(self.id)))
+        self.assertEqual(self.handler.results[self.id][1], completed)
         self.assertEqual(len(list(self.root.iterdir())), 1)
 
     def test_invalid_cancel_does_not_allocate_or_destroy(self):

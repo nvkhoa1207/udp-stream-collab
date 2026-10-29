@@ -276,6 +276,10 @@ class FileOfferReceiver:
             return self._error(packet, "FILE_SENDER_MISMATCH", "Sender does not match the transfer")
         if cached is not None:
             # COMPLETE đã có thì không xóa file; CANCEL lặp không kéo dài cache.
+            # COMPLETE đang gửi đã có transport lo retry. Không gửi DATA mới
+            # vì luồng file có thể đã đóng khi CANCEL tới trên control.
+            if cached[1].kind == MessageType.FILE_COMPLETE:
+                return None
             return cached[1]
         if transfer_id not in self.seen_ids:
             if len(self.seen_ids) >= MAX_FILE_OFFERS_PER_SESSION:

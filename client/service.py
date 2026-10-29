@@ -2,6 +2,7 @@
 
 import asyncio
 import re
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -49,6 +50,7 @@ class ClientService:
         self._file_worker_running = False
         self._file_sender = None
         self._sent_file_count = 0
+        self._bootstrap_packets = deque()
         if hasattr(type(transport), 'notify_delivery'):
             transport.identity = username
             transport.delivery_ready = self._can_receive
@@ -75,7 +77,8 @@ class ClientService:
             await self.transport.start()
             self.server_peer, session = await authenticate(self.tcp_peer, self.username, password)
             self.transport.register_peer(self.server_peer, session)
-            await bind_session(self.transport, self.server_peer, self.username, session)
+            packets = await bind_session(self.transport, self.server_peer, self.username, session)
+            self._bootstrap_packets.extend(packets)
             self.session_id = session
             self._session_tasks = [asyncio.create_task(self.receive_events()),
                                    asyncio.create_task(self._heartbeat())]
@@ -124,6 +127,7 @@ class ClientService:
                 task.cancel()
             await asyncio.gather(*self._session_tasks, return_exceptions=True)
             await self.transport.close()
+            self._bootstrap_packets.clear()
 
     def _check_session(self):
         if self.tcp_peer is not None and self.session_id is None:
@@ -152,7 +156,8 @@ class ClientService:
             kind=MessageType.MSG,
             sender=self.username,
             recipient=recipient,
-            stream_id=f"chat-{recipient}",
+            # Dùng chung một luồng chat; người nhận nằm trong header của từng gói.
+            stream_id="chat-messages",
             payload=payload,
         )
 
@@ -315,7 +320,10 @@ class ClientService:
 
     async def _receive_loop(self) -> None:
         while True:
-            received = await self.transport.receive()
+            if self._bootstrap_packets:
+                received = self._bootstrap_packets.popleft()
+            else:
+                received = await self.transport.receive()
             packet = received.packet
 
             # Client nhận dữ liệu qua server đã cấu hình.
