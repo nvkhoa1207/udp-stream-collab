@@ -18,6 +18,7 @@ const statusLabels = {
 let connected = false;
 let busy = false;
 let uploading = false;
+let sendingFile = false;
 let cursor = 0;
 let username = '';
 let serverErrors = [];
@@ -74,7 +75,7 @@ function updateConnection(value) {
     getElement(id).disabled = !connected;
   }
   getElement('login-button').disabled = connected || busy;
-  getElement('send-file').disabled = !connected || uploading;
+  getElement('send-file').disabled = !connected || uploading || sendingFile;
   for (const button of getElement('user-list').querySelectorAll('button')) {
     button.disabled = !connected;
   }
@@ -379,13 +380,14 @@ async function uploadFile(event) {
       throw new Error(result.error || 'The upload failed.');
     }
     getElement('upload-status').textContent = 'Send requested. Follow the transfer below.';
+    sendingFile = true;
     clearError('file');
   } catch (error) {
     showError(error, 'file');
     getElement('upload-status').textContent = 'Upload did not complete.';
   } finally {
     uploading = false;
-    getElement('send-file').disabled = !connected;
+    updateConnection(connected);
   }
 }
 
@@ -394,6 +396,7 @@ async function poll() {
   try {
     const result = await api('/api/events?after=' + cursor);
     serverErrors = result.errors || [];
+    sendingFile = result.sending_file;
     clearError('bridge');
     if (result.reset) {
       appendMessage(createElement('li', 'message-system', 'Some older events have expired. Showing the remaining history.'));

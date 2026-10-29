@@ -63,12 +63,17 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         path.write_bytes(b'hello')
         await runtime.upload('hai', path, owner)
         await entered.wait()
+        self.assertTrue((await runtime.poll(0))['sending_file'])
+        with self.assertRaisesRegex(ValueError, 'current file'):
+            await runtime.upload('hai', path)
+        self.assertEqual(client.send_file.call_count, 1)
         self.assertTrue(path.exists())
         jobs = list(runtime.jobs)
         for task in jobs:
             task.cancel()
         await asyncio.gather(*jobs, return_exceptions=True)
         self.assertFalse(Path(owner.name).exists())
+        self.assertFalse((await runtime.poll(0))['sending_file'])
 
     async def test_login_failure_does_not_create_connected_state(self):
         client = AsyncMock()

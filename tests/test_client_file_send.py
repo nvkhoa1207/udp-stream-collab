@@ -185,6 +185,10 @@ class ClientFileSendTests(unittest.IsolatedAsyncioTestCase):
             await self.finish_sending(meta)
             with self.assertRaises(TimeoutError):
                 await asyncio.wait_for(task, timeout=1)
+            update = self.client.poll_file_updates()[0]
+            self.assertEqual(update['transfer_id'], meta.stream_id)
+            self.assertEqual(update['status'], 'failed')
+            self.assertEqual(update['message'], 'Timed out during complete')
 
     async def test_invalid_complete_never_succeeds(self):
         for changes in ({"sha256": "0" * 64}, {"size": True}, {"size": -1}, {"extra": 1}):

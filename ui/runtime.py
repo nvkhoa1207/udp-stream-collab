@@ -18,6 +18,7 @@ class ClientRuntime:
         self.sequence = 0
         self.pump = None
         self.errors = {}
+        self.sending_file = False
 
     def make_client(self, host, port, username):
         transport = ReliableUdpTransport(('0.0.0.0', 0))
@@ -71,6 +72,7 @@ class ClientRuntime:
         return dict(connected=True)
 
     def start_job(self, awaitable, path=None, owner=None):
+        file_count = getattr(self.client, '_sent_file_count', None)
         if len(self.jobs) >= 4:
             awaitable.close()
             if path is not None:
@@ -84,9 +86,15 @@ class ClientRuntime:
             except FileTransferCancelled:
                 pass  # Trạng thái file đã báo hủy, không cần thêm một lỗi chung.
             except Exception as error:
-                self.emit(dict(type='error', message='Operation failed: ' + type(error).__name__))
+                if path is None:
+                    self.emit(dict(type='error', message='Operation failed: ' + str(error)))
+                elif getattr(self.client, '_sent_file_count', None) == file_count:
+                    # Chưa tạo lượt truyền thì chưa có thẻ file để báo lỗi.
+                    self.emit(dict(type='error', scope='upload',
+                                   message='Could not start ' + path.name + ': ' + str(error)))
             finally:
                 if path is not None:
+                    self.sending_file = False
                     if owner is not None:
                         await asyncio.to_thread(owner.cleanup)
                     else:
@@ -128,7 +136,14 @@ class ClientRuntime:
     async def upload(self, recipient, path, owner=None):
         if self.client is None or self.client.session_id is None:
             raise ValueError('Not connected')
-        return self.start_job(self.client.send_file(recipient, path), path, owner)
+        if self.sending_file:
+            raise ValueError('Wait for the current file to finish or cancel it first')
+        self.sending_file = True
+        try:
+            return self.start_job(self.client.send_file(recipient, path), path, owner)
+        except BaseException:
+            self.sending_file = False
+            raise
 
     async def poll(self, after):
         new_events = [event for event in self.events if event['id'] > after]
@@ -140,6 +155,7 @@ class ClientRuntime:
             'reset': history_expired,
             'connected': connected,
             'errors': list(self.errors.values()),
+            'sending_file': self.sending_file,
         }
 
     async def close(self):

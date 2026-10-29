@@ -166,8 +166,13 @@ class FileSender:
                 raise self.failure.result()
             await work
             status = "completed"
-        except (asyncio.CancelledError, FileTransferCancelled):
+        except (asyncio.CancelledError, FileTransferCancelled) as error:
             status = "cancelled"
+            self.updates.update(self.transfer_id, message=str(error) or 'Client stopped the transfer')
+            raise
+        except Exception as error:
+            message = str(error) or ('Timed out during ' + self.phase)
+            self.updates.update(self.transfer_id, message=message)
             raise
         finally:
             # Vẫn dọn file nếu tác vụ bị hủy lần nữa trong lúc báo bên nhận.
