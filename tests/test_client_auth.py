@@ -8,6 +8,16 @@ from common.models import Packet, MessageType, ReceivedPacket
 
 
 class AuthTests(unittest.IsolatedAsyncioTestCase):
+    async def test_logout_cleans_locally_when_server_is_unreachable(self):
+        for error in (TimeoutError(), ConnectionError(), OSError()):
+            transport = AsyncMock()
+            transport.send.side_effect = error
+            client = ClientService(transport, ('localhost', 9001), 'hai')
+            client.session_id = 'a' * 32
+            await client.logout()
+            self.assertIsNone(client.session_id)
+            transport.close.assert_awaited_once()
+
     async def test_bind_preserves_early_chat_and_bounds_pending_packets(self):
         peer = ('127.0.0.1', 9001)
         chat = ReceivedPacket(peer, Packet(

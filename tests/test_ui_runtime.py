@@ -7,6 +7,26 @@ from ui.runtime import ClientRuntime
 
 
 class RuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_dismiss_does_not_hide_new_errors_or_replay_old_ones(self):
+        runtime = ClientRuntime(Path('.'))
+        runtime.emit(dict(type='error', scope='session', message='Old session ended'))
+        old_id = runtime.sequence
+        runtime.emit(dict(type='error', scope='session', message='New session ended'))
+        await runtime.command('dismiss-errors', {'ids': [old_id]})
+        self.assertEqual((await runtime.poll(0))['errors'][0]['message'], 'New session ended')
+        await runtime.command('dismiss-errors', {'ids': [runtime.sequence]})
+        self.assertEqual((await runtime.poll(0))['errors'], [])
+        self.assertEqual(len((await runtime.poll(0))['events']), 2)
+
+    async def test_login_success_resolves_only_session_error(self):
+        runtime = ClientRuntime(Path('.'), factory=lambda *args: AsyncMock())
+        runtime.emit(dict(type='error', scope='session', message='Session ended'))
+        runtime.emit(dict(type='error', message='Other failure'))
+        await runtime.login(dict(host='localhost', port=9000, username='hai', password='test'))
+        runtime.pump.cancel()
+        await asyncio.gather(runtime.pump, return_exceptions=True)
+        self.assertEqual([e['message'] for e in (await runtime.poll(0))['errors']], ['Other failure'])
+
     async def test_requested_file_cancel_uses_snapshot_without_generic_error(self):
         from client.file_cancel import FileTransferCancelled
         runtime = ClientRuntime(Path('.'))

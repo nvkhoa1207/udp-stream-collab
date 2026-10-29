@@ -121,6 +121,8 @@ class ClientService:
                 await asyncio.wait_for(self.transport.send(self.server_peer, Packet(
                     kind=MessageType.LOGOUT, sender=self.username, recipient="server",
                     stream_id="control", session_id=self.session_id)), timeout=2)
+        except (TimeoutError, ConnectionError, OSError):
+            pass  # Server tắt vẫn phải cho người dùng logout và dọn local.
         finally:
             self.session_id = None
             for task in self._session_tasks:

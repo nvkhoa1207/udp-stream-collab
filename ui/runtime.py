@@ -17,6 +17,7 @@ class ClientRuntime:
         self.events = deque(maxlen=512)
         self.sequence = 0
         self.pump = None
+        self.errors = {}
 
     def make_client(self, host, port, username):
         transport = ReliableUdpTransport(('0.0.0.0', 0))
@@ -28,7 +29,10 @@ class ClientRuntime:
 
     def emit(self, event):
         self.sequence += 1
-        self.events.append(dict(event, id=self.sequence))
+        event = dict(event, id=self.sequence)
+        self.events.append(event)
+        if event['type'] == 'error':
+            self.errors[event.get('scope', 'operation')] = event
 
     async def collect(self):
         while self.client is not None:
@@ -41,7 +45,7 @@ class ClientRuntime:
                 self.emit(event)
             await asyncio.sleep(0.1)
             if client.session_id is None:
-                self.emit(dict(type='error', message='Session ended; log in again to reconnect.'))
+                self.emit(dict(type='error', scope='session', message='Session ended; log in again to reconnect.'))
                 return
 
     async def login(self, body):
@@ -61,6 +65,7 @@ class ClientRuntime:
         client = await asyncio.to_thread(self.factory, host, port, username)
         await client.login(body['password'])
         self.client = client
+        self.errors.pop('session', None)
         self.emit(dict(type='connection', connected=True, username=username))
         self.pump = asyncio.create_task(self.collect())
         return dict(connected=True)
@@ -96,6 +101,13 @@ class ClientRuntime:
         return dict(accepted=True)
 
     async def command(self, action, body):
+        if action == 'dismiss-errors':
+            ids = body['ids']
+            if type(ids) is not list or any(type(value) is not int for value in ids):
+                raise ValueError('Invalid error IDs')
+            # Chỉ đóng các lỗi browser đã thấy, không che lỗi mới đến sau đó.
+            self.errors = {key: event for key, event in self.errors.items() if event['id'] not in ids}
+            return dict(accepted=True)
         if action == 'login':
             return await self.login(body)
         if action == 'logout':
@@ -127,6 +139,7 @@ class ClientRuntime:
             'cursor': self.sequence,
             'reset': history_expired,
             'connected': connected,
+            'errors': list(self.errors.values()),
         }
 
     async def close(self):

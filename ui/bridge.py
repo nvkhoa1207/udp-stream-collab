@@ -141,6 +141,8 @@ def make_handler(runtime, loop, token):
                 self.reply(503, {'error': 'This operation is not supported by the configured transport or server.'})
             except PermissionError:
                 self.reply(401, {'error': 'Login was rejected'})
+            except (TimeoutError, ConnectionError, OSError):
+                self.reply(503, {'error': 'Cannot reach the server; check the address and connection'})
             except (ValueError, KeyError, TypeError, UnicodeError):
                 self.reply(400, {'error': 'Invalid data or client is busy'})
             except Exception:

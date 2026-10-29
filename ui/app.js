@@ -20,6 +20,8 @@ let busy = false;
 let uploading = false;
 let cursor = 0;
 let username = '';
+let serverErrors = [];
+const localErrors = new Map();
 
 function getElement(id) {
   return document.getElementById(id);
@@ -33,8 +35,20 @@ function createElement(tag, className, text = '') {
   return element;
 }
 
-function showError(error) {
-  getElement('error').textContent = error.message || String(error);
+function renderErrors() {
+  const messages = [...serverErrors.map(error => error.message), ...localErrors.values()];
+  getElement('error').textContent = messages.join(' ');
+  getElement('dismiss-error').hidden = messages.length === 0;
+}
+
+function showError(error, scope = 'operation') {
+  localErrors.set(scope, error.message || String(error));
+  renderErrors();
+}
+
+function clearError(scope) {
+  localErrors.delete(scope);
+  renderErrors();
 }
 
 function updateConnection(value) {
@@ -270,7 +284,7 @@ function handleEvent(event) {
       showMessage(event.sender, event.recipient, event.text);
       break;
     case 'error':
-      showError(event.message);
+      // Lỗi hiện tại lấy từ snapshot; không phát lại lỗi trong lịch sử.
       break;
     case 'file':
       updateFile(event);
@@ -289,7 +303,7 @@ async function login(event) {
   event.preventDefault();
   busy = true;
   updateConnection(false);
-  getElement('error').textContent = '';
+  clearError('login');
   try {
     const name = getElement('username').value;
     await api('/api/login', {
@@ -301,7 +315,7 @@ async function login(event) {
     username = name;
     updateConnection(true);
   } catch (error) {
-    showError(error);
+    showError(error, 'login');
   } finally {
     busy = false;
     getElement('password').value = '';
@@ -323,16 +337,17 @@ async function sendMessage(event) {
   const text = getElement('text').value;
   const recipient = getElement('recipient').value;
   if (new TextEncoder().encode(text).length > 480) {
-    showError('Messages must not exceed 480 UTF-8 bytes.');
+    showError('Messages must not exceed 480 UTF-8 bytes.', 'chat');
     return;
   }
   try {
     await api('/api/messages', {recipient, text});
+    clearError('chat');
     showMessage('You', recipient, text, true);
     getElement('text').value = '';
     updateByteCount();
   } catch (error) {
-    showError(error);
+    showError(error, 'chat');
   }
 }
 
@@ -341,11 +356,11 @@ async function uploadFile(event) {
   const file = getElement('file').files[0];
   const recipient = getElement('recipient').value;
   if (!file || recipient === '*') {
-    showError('Choose a file and one recipient.');
+    showError('Choose a file and one recipient.', 'file');
     return;
   }
   if (file.size > 16 * 1024 * 1024) {
-    showError('Files must not exceed 16 MiB.');
+    showError('Files must not exceed 16 MiB.', 'file');
     return;
   }
 
@@ -364,8 +379,9 @@ async function uploadFile(event) {
       throw new Error(result.error || 'The upload failed.');
     }
     getElement('upload-status').textContent = 'Send requested. Follow the transfer below.';
+    clearError('file');
   } catch (error) {
-    showError(error);
+    showError(error, 'file');
     getElement('upload-status').textContent = 'Upload did not complete.';
   } finally {
     uploading = false;
@@ -377,6 +393,8 @@ async function uploadFile(event) {
 async function poll() {
   try {
     const result = await api('/api/events?after=' + cursor);
+    serverErrors = result.errors || [];
+    clearError('bridge');
     if (result.reset) {
       appendMessage(createElement('li', 'message-system', 'Some older events have expired. Showing the remaining history.'));
     }
@@ -389,7 +407,7 @@ async function poll() {
     }
   } catch (error) {
     updateConnection(false);
-    showError(error);
+    showError(error, 'bridge');
   } finally {
     setTimeout(poll, 500);
   }
@@ -399,9 +417,22 @@ getElement('login').onsubmit = login;
 getElement('logout').onclick = logout;
 getElement('chat').onsubmit = sendMessage;
 getElement('upload').onsubmit = uploadFile;
-getElement('recipient').onchange = updateRecipient;
-getElement('text').oninput = updateByteCount;
+getElement('dismiss-error').onclick = async () => {
+  const ids = serverErrors.map(error => error.id);
+  try {
+    await api('/api/dismiss-errors', {ids});
+    serverErrors = serverErrors.filter(error => !ids.includes(error.id));
+    localErrors.clear();
+    renderErrors();
+  } catch (error) {
+    showError(error, 'bridge');
+  }
+};
+getElement('login').oninput = () => clearError('login');
+getElement('recipient').onchange = () => { updateRecipient(); clearError('file'); };
+getElement('text').oninput = () => { updateByteCount(); clearError('chat'); };
 getElement('file').onchange = () => {
+  clearError('file');
   const file = getElement('file').files[0];
   getElement('selected-file').textContent = file ? file.name : 'No file selected';
 };
