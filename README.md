@@ -161,7 +161,11 @@ thông điệp hoàn chỉnh.
 3. Server xác định sender từ phiên hợp lệ, kiểm tra người nhận rồi chuyển tiếp.
 4. `recipient="*"`: gửi đến các client online khác; người gửi hiển thị bản tin
    của mình. Username cụ thể: chỉ gửi đến người đó.
-5. Client nhận phát event `message`; UI hiển thị nội dung bằng `textContent`.
+5. Runtime lưu cả tin gửi và tin nhận trong hàng đợi tối đa 512 event ở RAM;
+   UI lấy cùng nguồn này khi polling hoặc F5, hiển thị bằng `textContent`.
+   Tin gửi hiện `Send requested`, không coi ACK là đã giao đến người nhận.
+   Đăng nhập thành công bằng tài khoản khác sẽ xóa lịch sử RAM và danh sách
+   Download của tài khoản trước trên client đó; không xóa file đã lưu trên đĩa.
 
 Tin nhắn giới hạn **480 byte UTF-8**, không phải 480 ký tự. ACK từ server chỉ
 xác nhận chặng đến server, không chứng minh người nhận đã nhận/đọc. Nếu đích
@@ -322,10 +326,12 @@ Cửa sổ 3 — client Khoa:
 
 Mở [client Hải](http://127.0.0.1:8000) và [client Khoa](http://127.0.0.1:8001).
 Nhập server `127.0.0.1`, TCP `9000`, username và mật khẩu vừa đặt trên server.
-Sau BIND mới có online/chat/file. Chọn `Tất cả` để chat chung hoặc username để
-chat riêng/gửi file. File tự nhận; không cần bấm Accept. Sender chỉ “Hoàn tất”
+Sau BIND mới có online/chat/file. Chọn `Everyone` để chat chung hoặc username để
+chat riêng/gửi file. Số online tính cả bản thân; dòng `(You)` bị khóa để tránh tự gửi.
+File tự nhận; không cần bấm Accept. Sender chỉ `Completed`
 sau COMPLETE đúng size/hash; byte ACK đến server chưa chứng minh người nhận đã lưu.
-Nút Hủy có ở cả phía gửi và nhận. Ctrl+C đóng từng chương trình.
+Nút `Cancel` có ở cả phía gửi và nhận khi lượt còn hủy được. File nhận hoàn tất
+có nút `Download`. Ctrl+C đóng từng chương trình.
 
 macOS/Linux dùng `python3 -m venv .venv`, sau đó `.venv/bin/python -m ...` với
 cùng tham số. Bản này mới được đo trên Windows/Python 3.13; Docker/Linux chưa chạy.
@@ -372,6 +378,9 @@ Số đo chỉ là một lần chạy, không phải percentile, cam kết throu
 LAN. Faults được bơm quanh socket write; datagram còn lại đi UDP thật nhưng đây
 không phải netem. CUBIC được kiểm tra bằng clock unit test và đường truyền có
 loss/delay; không tuyên bố tương đương đầy đủ RFC 9438.
+
+[Kiểm tra UI cuối ngày 30/10/2026](docs/06-final-ui-review.md) ghi riêng bằng chứng
+browser, lỗi Cancel, lịch sử sau F5 và kết quả 222 test (gồm 20 client × hai vòng × 380 tin).
 
 [Bảng T01–T22](docs/04_ACCEPTANCE.md) phân biệt bằng chứng mạng thật, unit test,
 mock và phần chưa chạy. Docker CLI có sẵn nhưng Engine không chạy trên máy này;

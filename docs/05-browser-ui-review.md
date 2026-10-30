@@ -1,5 +1,9 @@
 # Kiểm tra UI sau R1–R4 — 30/10/2026
 
+Đây là kết quả của đợt kiểm tra trước. [Đợt kiểm tra cuối](06-final-ui-review.md)
+cập nhật lựa chọn hiển thị bản thân, lỗi Cancel, lịch sử chat sau F5 và bài
+20 client chạy lại theo yêu cầu mới. Các kết quả bên dưới giữ nguyên để đối chiếu.
+
 R1–R4 được kiểm tra diff, commit riêng ở `42592ae` và push trước khi sửa UI.
 Không chạy lại bài 20 client × hai vòng × 380 tin.
 
