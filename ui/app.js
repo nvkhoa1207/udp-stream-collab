@@ -2,6 +2,7 @@
 
 const token = document.querySelector('meta[name="client-token"]').content;
 const fileRows = new Map();
+const messageRows = new Map();
 const terminalStatuses = new Set(['completed', 'failed', 'cancelled', 'expired']);
 const statusLabels = {
   preparing: 'Preparing',
@@ -25,6 +26,7 @@ let serverErrors = [];
 const localErrors = new Map();
 let downloads = new Set();
 let onlineKey = '';
+let historyVersion = null;
 
 function getElement(id) {
   return document.getElementById(id);
@@ -165,23 +167,33 @@ function appendMessage(item) {
   const messages = getElement('messages');
   messages.append(item);
   // Bỏ tin cũ để trang không giữ quá nhiều phần tử khi chạy lâu.
-  while (messages.children.length > 500) {
+  while (messages.children.length > 513) {
     messages.firstChild.remove();
   }
   messages.scrollTop = messages.scrollHeight;
 }
 
-function showMessage(sender, recipient, text, outgoing = false) {
+function showMessage(event) {
+  const {sender, recipient, text, outgoing = false} = event;
+  const key = event.message_id || String(event.id);
+  if (messageRows.has(key)) return;
   const item = createElement('li', outgoing ? 'message message-outgoing' : 'message');
   const target = recipient === '*' ? 'everyone' : recipient;
   const kind = recipient === '*' ? 'Broadcast' : 'Private';
   let details = sender + ' → ' + target + ' · ' + kind;
-  if (outgoing) {
-    details += ' · Send requested';
-  }
-  item.append(createElement('span', 'message-meta', details));
+  const meta = createElement('span', 'message-meta', details);
+  item.append(meta);
   item.append(createElement('span', 'message-body', text));
+  messageRows.set(key, {item, meta, details, id: event.id, outgoing});
+  updateMessageStatus({...event, message_id: key});
   appendMessage(item);
+}
+
+function updateMessageStatus(event) {
+  const row = messageRows.get(event.message_id);
+  if (!row || !row.outgoing) return;
+  row.meta.textContent = row.details + (event.status === 'failed'
+    ? ' · Failed: ' + event.reason : ' · Send requested');
 }
 
 function updateByteCount() {
@@ -331,7 +343,10 @@ function updateFile(event) {
 function handleEvent(event) {
   switch (event.type) {
     case 'message':
-      showMessage(event.sender, event.recipient, event.text);
+      showMessage(event);
+      break;
+    case 'message_status':
+      updateMessageStatus(event);
       break;
     case 'error':
       // Lỗi hiện tại lấy từ snapshot; không phát lại lỗi trong lịch sử.
@@ -390,7 +405,6 @@ async function sendMessage(event) {
   try {
     await api('/api/messages', {recipient, text});
     clearError('chat');
-    showMessage('You', recipient, text, true);
     getElement('text').value = '';
     updateByteCount();
   } catch (error) {
@@ -441,11 +455,35 @@ async function uploadFile(event) {
 async function poll() {
   try {
     const result = await api('/api/events?after=' + cursor);
+    const changedAccount = historyVersion !== null && historyVersion !== result.history_version;
+    if (changedAccount) {
+      getElement('messages').replaceChildren();
+      getElement('files').replaceChildren();
+      messageRows.clear();
+      fileRows.clear();
+      localErrors.clear();
+      getElement('text').value = '';
+      updateByteCount();
+      getElement('file').value = '';
+      getElement('selected-file').textContent = 'No file selected';
+      getElement('upload-status').textContent = '';
+    }
+    historyVersion = result.history_version;
     serverErrors = result.errors || [];
     sendingFile = result.sending_file;
     downloads = new Set(result.downloads || []);
     clearError('bridge');
-    if (result.reset) {
+    let removedMessages = false;
+    for (const [key, row] of messageRows) {
+      if (row.id < result.oldest_id) {
+        row.item.remove();
+        messageRows.delete(key);
+        removedMessages = true;
+      }
+    }
+    if (!changedAccount && (result.reset || removedMessages)) {
+      const oldNotice = getElement('messages').querySelector('.message-system');
+      if (oldNotice) oldNotice.remove();
       appendMessage(createElement('li', 'message-system', 'Some older events have expired. Showing the remaining history.'));
     }
     for (const event of result.events) {

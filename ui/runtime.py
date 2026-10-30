@@ -3,6 +3,7 @@ import asyncio
 import re
 from collections import deque
 from pathlib import Path
+from uuid import uuid4
 from client.service import ClientService
 from client.files import FileReceiver
 from transport.reliable_udp import ReliableUdpTransport
@@ -22,6 +23,8 @@ class ClientRuntime:
         self.sending_file = False
         self.downloads = {}
         self.users = []
+        self.account = None
+        self.history_version = 0
 
     def make_client(self, host, port, username):
         transport = ReliableUdpTransport(('0.0.0.0', 0))
@@ -32,6 +35,9 @@ class ClientRuntime:
         )
 
     def emit(self, event):
+        if event['type'] == 'error' and event.get('related_message_id'):
+            if self.fail_message(event['related_message_id'], event['message']):
+                return
         if event['type'] == 'file_error':
             previous = next((item for item in reversed(self.events) if item['type'] == 'file'
                 and item['transfer_id'] == event['transfer_id']
@@ -60,15 +66,44 @@ class ClientRuntime:
         if event['type'] == 'error':
             self.errors[event.get('scope', 'operation')] = event
 
+    def fail_message(self, message_id, reason):
+        for event in self.events:
+            if event['type'] == 'message' and event.get('outgoing') and event.get('message_id') == message_id:
+                event.update(status='failed', reason=reason)
+                self.emit(dict(type='message_status', message_id=message_id, status='failed', reason=reason))
+                return True
+        return False
+
+    def send_message(self, body):
+        client = self.client
+        message_id = uuid4().hex
+        recipient, text = body['recipient'], body['text']
+        if type(recipient) is not str or type(text) is not str:
+            raise ValueError('Invalid message')
+        async def send():
+            try:
+                await client.send_chat(recipient, text, message_id=message_id)
+            except asyncio.CancelledError:
+                self.fail_message(message_id, 'Client stopped before sending finished')
+                raise
+            except Exception as error:
+                if not self.fail_message(message_id, str(error) or type(error).__name__):
+                    self.emit(dict(type='error', scope='chat-operation', message='Message failed: ' + str(error)))
+        result = self.start_job(send())
+        self.emit(dict(type='message', message_id=message_id, outgoing=True, status='requested',
+                       sender=client.username, recipient=recipient, text=text))
+        return result
+
     async def collect(self):
         while self.client is not None:
             client = self.client
+            # Tạo thẻ trước khi xử lý lỗi tham chiếu tới lượt file vừa bắt đầu.
+            for event in client.poll_file_updates():
+                self.emit(event)
             while not client.events.empty():
                 self.emit(client.events.get_nowait())
             if hasattr(type(client.transport), 'notify_delivery'):
                 client.transport.notify_delivery()
-            for event in client.poll_file_updates():
-                self.emit(event)
             await asyncio.sleep(0.1)
             if client.session_id is None:
                 self.emit(dict(type='error', scope='session', message='Session ended; log in again to reconnect.'))
@@ -90,6 +125,13 @@ class ClientRuntime:
         # Tạo thư mục nhận file trong thread để không chặn vòng xử lý mạng.
         client = await asyncio.to_thread(self.factory, host, port, username)
         await client.login(body['password'])
+        if self.account is not None and self.account != username:
+            # Đổi tài khoản thì bỏ lịch sử RAM và quyền tải cũ, không xóa file trên đĩa.
+            self.events.clear()
+            self.errors.clear()
+            self.downloads.clear()
+            self.history_version += 1
+        self.account = username
         self.client = client
         self.users = []
         self.errors.pop('session', None)
@@ -150,7 +192,7 @@ class ClientRuntime:
         if self.client is None or self.client.session_id is None:
             raise ValueError('Not connected')
         if action == 'messages':
-            return self.start_job(self.client.send_chat(body['recipient'], body['text']))
+            return self.send_message(body)
         if action == 'cancel':
             if body['direction'] == 'receive':
                 method = self.client.cancel_receive_file
@@ -185,6 +227,8 @@ class ClientRuntime:
             'downloads': list(self.downloads),
             'username': self.client.username if connected else '',
             'users': self.users if connected else [],
+            'history_version': self.history_version,
+            'oldest_id': self.events[0]['id'] if self.events else self.sequence + 1,
         }
 
     async def download(self, transfer_id):

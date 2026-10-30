@@ -5,6 +5,7 @@ import re
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 
 from common.config import MAX_PAYLOAD_BYTES
 from common.contracts import Transport
@@ -141,7 +142,7 @@ class ClientService:
         if self.tcp_peer is not None and self.session_id is None:
             raise ConnectionError("Client is not logged in and bound, or the session has ended")
 
-    async def send_chat(self, recipient: str, text: str) -> None:
+    async def send_chat(self, recipient: str, text: str, message_id=None) -> None:
         self._check_session()
         recipient = recipient.strip()
         if recipient == self.username:
@@ -164,6 +165,7 @@ class ClientService:
 
         packet = Packet(
             kind=MessageType.MSG,
+            message_id=message_id or uuid4().hex,
             sender=self.username,
             recipient=recipient,
             # Dùng chung một luồng chat; người nhận nằm trong header của từng gói.
@@ -405,6 +407,7 @@ class ClientService:
 
                 await self.events.put({
                     "type": "message",
+                    "message_id": packet.message_id,
                     "sender": packet.sender,
                     "recipient": packet.recipient,
                     "text": text,

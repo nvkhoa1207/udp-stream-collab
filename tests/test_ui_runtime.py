@@ -7,6 +7,85 @@ from ui.runtime import ClientRuntime
 
 
 class RuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_collector_records_new_file_before_its_correlated_error(self):
+        from types import SimpleNamespace
+        runtime = ClientRuntime(Path('.'))
+        events = asyncio.Queue()
+        events.put_nowait(dict(type='file_error', direction='receive', transfer_id='a' * 32,
+                              code='RELAY_FAILED', message='Relay failed'))
+        runtime.client = SimpleNamespace(session_id=None, events=events, transport=object(),
+            poll_file_updates=lambda: [dict(type='file', direction='receive', transfer_id='a' * 32,
+                                           status='receiving', name='new.bin')])
+        await runtime.collect()
+        self.assertNotIn('file-operation', runtime.errors)
+        self.assertEqual([e for e in runtime.events if e['type'] == 'file'][-1]['status'], 'failed')
+
+    async def test_sent_messages_share_bounded_history_and_keep_unique_ids(self):
+        runtime = ClientRuntime(Path('.'))
+        runtime.client = AsyncMock(session_id='session', username='hai')
+        for target in ('khoa', '*'):
+            await runtime.command('messages', dict(recipient=target, text='same text'))
+            await asyncio.gather(*tuple(runtime.jobs))
+            runtime.emit(dict(type='message', sender='khoa', recipient=target,
+                              text='reply', message_id=target))
+        first = await runtime.poll(0)
+        messages = [e for e in first['events'] if e['type'] == 'message']
+        self.assertEqual([e['text'] for e in messages], ['same text', 'reply', 'same text', 'reply'])
+        sent = [e for e in messages if e.get('outgoing')]
+        self.assertNotEqual(sent[0]['message_id'], sent[1]['message_id'])
+        self.assertTrue(all(e['status'] == 'requested' for e in sent))
+        self.assertEqual((await runtime.poll(0))['events'], first['events'])
+        self.assertEqual((await runtime.poll(first['cursor']))['events'], [])
+        for n in range(600):
+            runtime.emit(dict(type='message', text=str(n)))
+        result = await runtime.poll(0)
+        self.assertTrue(result['reset'])
+        self.assertEqual(len(result['events']), 512)
+        self.assertEqual(result['events'][0]['text'], '88')
+
+    async def test_failed_send_and_relay_error_update_message_without_duplicate(self):
+        runtime = ClientRuntime(Path('.'))
+        runtime.client = AsyncMock(session_id='session', username='hai')
+        runtime.client.send_chat.side_effect = TimeoutError('ACK timed out')
+        await runtime.command('messages', dict(recipient='khoa', text='failure'))
+        await asyncio.gather(*tuple(runtime.jobs))
+        messages = [e for e in runtime.events if e['type'] == 'message']
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]['status'], 'failed')
+        runtime.emit(dict(type='error', related_message_id=messages[0]['message_id'], message='Relay failed'))
+        self.assertEqual(messages[0]['reason'], 'Relay failed')
+        self.assertEqual((await runtime.poll(0))['errors'], [])
+
+    async def test_account_switch_resets_ram_and_downloads_without_deleting_files(self):
+        def factory(host, port, name):
+            client = AsyncMock(session_id='session', username=name)
+            client.poll_file_updates = lambda: []
+            return client
+        with tempfile.TemporaryDirectory() as folder:
+            runtime = ClientRuntime(Path(folder), factory=factory)
+            body = dict(host='localhost', port=9000, username='hai', password='test')
+            await runtime.login(body)
+            runtime.pump.cancel()
+            await asyncio.gather(runtime.pump, return_exceptions=True)
+            runtime.emit(dict(type='message', text='private history'))
+            transfer_id = 'a' * 32
+            path = Path(folder) / (transfer_id + '_saved.txt')
+            path.write_bytes(b'keep')
+            runtime.emit(dict(type='file', direction='receive', transfer_id=transfer_id,
+                              name='saved.txt', status='completed'))
+            await runtime.close()
+            self.assertEqual((await runtime.download(transfer_id))[1], b'keep')
+            old_version = runtime.history_version
+            await runtime.login(dict(body, username='khoa'))
+            runtime.pump.cancel()
+            await asyncio.gather(runtime.pump, return_exceptions=True)
+            self.assertGreater(runtime.history_version, old_version)
+            self.assertFalse([e for e in runtime.events if e['type'] in ('message', 'file')])
+            with self.assertRaises(FileNotFoundError):
+                await runtime.download(transfer_id)
+            self.assertEqual(path.read_bytes(), b'keep')
+            await runtime.close()
+
     async def test_file_error_updates_matching_card_without_global_banner(self):
         runtime = ClientRuntime(Path('.'))
         for transfer_id in ('a' * 32, 'b' * 32):
