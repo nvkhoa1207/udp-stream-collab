@@ -1,2 +1,2 @@
-# Cài khi làm K5; chốt phiên bản đã kiểm tra trên cả hai máy trước khi nộp.
-cryptography
+# Bản đầu và các demo hiện tại chỉ dùng thư viện chuẩn Python.
+# Nếu triển khai AES-GCM tùy chọn, bổ sung cryptography cùng phiên bản đã kiểm thử.

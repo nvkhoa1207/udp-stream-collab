@@ -1,20 +1,22 @@
-"""Owner Khoa. Entrypoint có --help; client mạng thật chưa được viết."""
-
+"""Mở HTTP UI localhost; đăng nhập trong browser, không đưa password qua CLI."""
 import argparse
-
-from common.config import TCP_PORT, UDP_PORT
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Client starter — cần làm K1–K7")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--tcp-port", type=int, default=TCP_PORT)
-    parser.add_argument("--udp-port", type=int, default=UDP_PORT)
-    parser.add_argument("--username", required=True)
-    parser.parse_args()
-    # TODO[K1]: tạo service, kết nối/login, nhận event nền; không truyền password qua CLI.
-    parser.exit(2, "Chưa có client thật. Thực hiện TODO[K1] trong client/service.py.\n")
+from pathlib import Path
+from ui.bridge import run_bridge
+from common.config import configure_console
 
 
-if __name__ == "__main__":
+def main():
+    configure_console()
+    parser = argparse.ArgumentParser(
+        description='Open the local web client. Log in from the browser.'
+    )
+    parser.add_argument('--http-port', type=int, default=8000)
+    parser.add_argument('--received-dir', type=Path, default=Path('data/received'))
+    args = parser.parse_args()
+    if not 1 <= args.http_port <= 65535:
+        parser.error('HTTP port must be between 1 and 65535')
+    run_bridge(args.http_port, args.received_dir)
+
+
+if __name__ == '__main__':
     main()

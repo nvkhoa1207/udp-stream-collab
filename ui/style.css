@@ -1,0 +1,483 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color: #17323b;
+  background: #f1f5f7;
+  --accent: #176975;
+  --border: #d4e0e5;
+  --muted: #526d78;
+  --danger: #9f2435;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  max-width: 1440px;
+  margin: auto;
+  padding: 28px;
+}
+
+h1, h2, p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 6px;
+  font-size: 1.8rem;
+}
+
+h2 {
+  margin-bottom: 16px;
+  font-size: 1.1rem;
+}
+
+.page-header, .section-heading, .composer-footer, .file-header, .file-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.page-header {
+  margin-bottom: 24px;
+}
+
+.subtitle, .hint, .note, small {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.subtitle, .connection, .section-heading h2 {
+  margin-bottom: 0;
+}
+
+.connection, .badge, .count {
+  border-radius: 20px;
+  background: #edf2f4;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.connection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.connection::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #64748b;
+  flex-shrink: 0;
+}
+
+.connection[data-state="online"] {
+  background: #e5f4ee;
+  color: #176344;
+}
+
+.connection[data-state="online"]::before {
+  background: #228353;
+}
+
+.connection[data-state="connecting"]::before {
+  background: #b56a0c;
+}
+
+.panel {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: white;
+}
+
+.connection-panel {
+  margin-bottom: 20px;
+}
+
+#login {
+  display: grid;
+  grid-template-columns: 1.4fr 0.7fr 1fr 1fr auto;
+  align-items: end;
+  gap: 12px;
+}
+
+label {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+  font-size: 0.9rem;
+}
+
+input, select, textarea, button {
+  max-width: 100%;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #a7bdc5;
+  border-radius: 6px;
+  font: inherit;
+}
+
+input, select, textarea {
+  width: 100%;
+  background: white;
+  color: inherit;
+}
+
+textarea {
+  resize: vertical;
+}
+
+button {
+  background: var(--accent);
+  color: white;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  filter: brightness(0.94);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+input:disabled, select:disabled, textarea:disabled {
+  background: #f4f7f8;
+}
+
+.secondary {
+  background: white;
+  color: var(--accent);
+}
+
+.button-group {
+  display: flex;
+  gap: 8px;
+}
+
+/* Màn hình rộng chia ba cột để xem người nhận, chat và file cùng lúc. */
+.workspace {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.section-heading {
+  margin-bottom: 16px;
+}
+
+.hint, .note {
+  font-size: 0.82rem;
+}
+
+#user-list, #messages, #files {
+  padding: 0;
+  list-style: none;
+}
+
+#user-list {
+  max-height: 280px;
+  overflow: auto;
+}
+
+#user-list li {
+  margin-bottom: 6px;
+}
+
+.user-button {
+  width: 100%;
+  border-color: transparent;
+  text-align: left;
+  overflow-wrap: anywhere;
+  background: #f6f9fa;
+  color: inherit;
+}
+
+.user-button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: #e6f4f1;
+  color: #145560;
+}
+
+#messages {
+  height: 300px;
+  margin: 0 0 18px;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fafb;
+}
+
+#messages:empty::before, #files:empty::before, #user-list:empty::before {
+  display: block;
+  padding: 20px 4px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+#messages:empty::before {
+  content: 'No messages yet. Choose a recipient and start a conversation.';
+}
+
+#files:empty::before {
+  content: 'Your incoming and outgoing transfers will appear here.';
+}
+
+#user-list:empty::before {
+  content: 'Log in to see who is online.';
+}
+
+.message {
+  width: fit-content;
+  max-width: 95%;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: white;
+  overflow-wrap: anywhere;
+}
+
+.message-outgoing {
+  margin-left: auto;
+  background: #e6f4f1;
+}
+
+.message-meta {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 0.73rem;
+}
+
+.message-body {
+  white-space: pre-wrap;
+}
+
+.message-system {
+  padding: 8px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 0.8rem;
+}
+
+#chat, #upload {
+  display: grid;
+  gap: 12px;
+}
+
+#upload button {
+  justify-self: start;
+}
+
+.field-label {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 0.9rem;
+}
+
+/* Giữ input file thật cho bàn phím, phủ nhãn tiếng Anh lên phần hiển thị. */
+.file-picker {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid #a7bdc5;
+  border-radius: 6px;
+}
+
+.file-picker input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.file-picker:has(input:disabled) {
+  opacity: 0.5;
+}
+
+.file-picker-button {
+  padding: 5px 8px;
+  background: #edf2f4;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+#selected-file {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.file-picker:focus-within {
+  outline: 3px solid #e6ad32;
+  outline-offset: 2px;
+}
+
+.recipient-hint {
+  margin-bottom: 8px;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+#upload-status {
+  margin: 12px 0;
+}
+
+#files {
+  max-height: 400px;
+  overflow: auto;
+  margin-bottom: 0;
+}
+
+.file-card {
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.file-footer {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.file-name {
+  display: block;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+
+.file-peer, .file-details, .file-warning {
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.file-details {
+  color: var(--muted);
+}
+
+.file-warning {
+  margin: 10px 0 0;
+  color: var(--danger);
+}
+
+.file-warning:empty, #upload-status:empty, #error:empty {
+  display: none;
+}
+
+progress {
+  width: 100%;
+  height: 10px;
+  margin: 4px 0 10px;
+  accent-color: var(--accent);
+}
+
+.cancel-button {
+  padding: 5px 10px;
+  background: white;
+  border-color: #ce9ca5;
+  color: var(--danger);
+  font-size: 0.8rem;
+}
+
+.status-active {
+  background: #e6f2fa;
+  color: #155d85;
+}
+
+.status-verifying {
+  background: #fff1d6;
+  color: #89510b;
+}
+
+.status-completed {
+  background: #e5f4ee;
+  color: #176344;
+}
+
+.status-failed {
+  background: #fcebed;
+  color: var(--danger);
+}
+
+.over-limit {
+  color: var(--danger);
+}
+
+#error {
+  padding: 12px 16px;
+  border-left: 4px solid var(--danger);
+  border-radius: 4px;
+  background: #fcebed;
+  color: var(--danger);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.note {
+  margin-top: 20px;
+}
+
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: 3px solid #e6ad32;
+  outline-offset: 2px;
+}
+
+/* Tablet đưa danh sách người dùng lên trên hai khung chat và file. */
+@media (max-width: 1100px) {
+  #login {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workspace {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .people-panel {
+    grid-column: 1 / -1;
+  }
+
+  #user-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  #user-list li {
+    max-width: 100%;
+  }
+
+}
+
+/* Điện thoại xếp các khung thành một cột, tránh tràn ngang. */
+@media (max-width: 680px) {
+  main, .panel {
+    padding: 16px;
+  }
+
+  .workspace, #login {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .page-header {
+    align-items: start;
+  }
+
+}

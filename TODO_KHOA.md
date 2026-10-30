@@ -1,6 +1,14 @@
-# Khoa — client, file, mật mã và giao diện
+# Bản ghép ngày 29/10/2026
 
-Owner: `client/`, `security/`, `ui/`. Dùng `common/` đã chốt, không tự đổi field.
+K1–K6 đã ghép server/transport thật trên hai/server-transport. K7 có bằng chứng
+loopback, HTTP và browser; LAN/netem chưa chạy. K8 giữ báo cáo Khoa nguyên bản,
+bổ sung báo cáo Hải để ghép. Các mục phía dưới ghi kế hoạch/bàn giao trước khi ghép.
+
+# Khoa — client, file và giao diện
+
+Owner: `client/`, `ui/`; phối hợp kiểm tra an toàn đầu vào/file/phiên.
+`security/cipher.py` là mở rộng tùy chọn ngoài bản đầu. Dùng `common/` và API đã
+cập nhật ngày 23/10/2026; thay đổi field phải cập nhật protocol/caller cùng lúc.
 Mở `scripts/demo_mock.py` trước: đây là cách làm song song mà chưa cần server thật.
 
 | ID | Ngày | Việc cần code / file | Xong khi |
@@ -9,15 +17,32 @@ Mở `scripts/demo_mock.py` trước: đây là cách làm song song mà chưa c
 | K2 | 2 | `client/service.py`: chat và danh sách người dùng | Nhập/gửi/nhận cùng lúc; chọn đúng recipient; thử trước với mock |
 | K3 | 2–3 | `client/files.py`: metadata, chunk, reassembly, hash | File rỗng, nhị phân, nhiều chunk đều đúng byte; không đọc cả file lớn vào RAM |
 | K4 | 3 | `client/service.py`, `client/files.py`: file đầu-cuối | Tiến độ từ byte đã ACK; chỉ hoàn tất khi nhận FILE_COMPLETE với hash đúng |
-| K5 | 3–4 | `security/cipher.py`: AES-GCM, phối hợp TLS/cấp khóa với A | Mã hóa/giải mã đúng; dữ liệu bị sửa bị loại; retry không làm reuse nonce sai |
-| K6 | 2–4 | `ui/`: fixture ngày 2, giao diện thật và cầu nối sau khi xác nhận | Hiện online, chat, progress và lỗi; không dùng WebSocket/framework bị cấm |
+| K5 | 3–4 | Kiểm tra đầu vào client/file/bridge; phối hợp session/BIND với Hải | Tên file/path an toàn; giới hạn tài nguyên; không log password/session; ghi đúng giới hạn chưa mã hóa |
+| K6 | 2–4 | `ui/`: fixture ngày 2, HTTP bridge localhost + polling đã chọn | Hiện online, chat, progress và lỗi; không dùng WebSocket/framework bị cấm |
 | K7 | 4 | Kiểm thử client/file/mất gói cùng A | Có kết quả thật, hash, log, ảnh; UI không đứng khi file đang gửi |
 | K8 | 5 | Báo cáo luồng chat/file, UI, kiểm thử + README client | Người khác chạy được client; mô tả đúng cái đã làm |
 
-## Thứ tự bắt đầu
+## Trạng thái sau các commit ngày 28/10/2026
+
+| Mốc | Code của Khoa | Kiểm chứng/việc còn lại |
+|---|---|---|
+| K1 | TCP login, BIND, heartbeat/logout, HTTP entrypoint | TCP loopback test đạt; BIND/lifecycle test fake, chờ transport Hải |
+| K2 | Chat, USER_LIST, event và UI | Mock đạt; chờ online/router thật |
+| K3 | Metadata/chunk/reassembly/hash/quota | Unit test và demo local đạt |
+| K4 | Gửi/nhận, progress, CANCEL hai chiều, timeout | Mock đạt; cần UDP đầu-cuối |
+| K5 | Validate file/input, quota/cleanup, HTTP Host/Origin/token | Test local đạt; bảo mật phiên/endpoint thật phụ thuộc Hải |
+| K6 | HTTP localhost + HTML/JS thật, polling/chat/file/cancel | Browser lỗi login stub đúng; chưa nghiệm thu UI với mạng thật |
+| K7 | Test tự động, demo/fault injection, TCP loopback và smoke UI | 119 ca (118 đạt + 1 tùy chọn); ca TCP riêng đạt; LAN/loss/load còn chờ Hải |
+| K8 | README/UI guide, báo cáo phần Khoa và ảnh minh chứng | reports/KHOA_REPORT.md; chưa ghép PDF báo cáo cả nhóm |
+
+Code thuộc client/ui đã có; không coi toàn BTL hoàn tất khi server/transport
+còn stub. Tham chiếu báo cáo và docs/06_TIEN_DO.md để phân biệt mock với mạng thật.
+
+## Thứ tự bắt đầu (lịch sử)
 
 1. Chạy `python -m scripts.demo_mock` và đọc `common/contracts.py`.
-2. Tạo `ClientService(transport)` có vòng nhận chạy nền và đẩy event vào queue.
+2. Dùng `ClientService(transport, server_peer, username)`, hoàn thiện vòng nhận
+   nền và event queue cho user/file/error bên cạnh MSG đã có.
 3. Dùng fixture online/chat/file-progress để làm UI khi A chưa có auth/router.
 4. Viết chia/ghép file bằng `BytesIO`/file tạm trước; sau đó thay đường gửi bằng
    `transport.send()`, giữ nguyên nghiệp vụ.
@@ -26,15 +51,17 @@ Mở `scripts/demo_mock.py` trước: đây là cách làm song song mà chưa c
 ## Checklist không bỏ sót
 
 - [ ] Không `input()`, đọc file lớn hay xử lý nặng chặn event loop; dùng cơ chế nền phù hợp.
-- [ ] FILE_META được chấp thuận trước khi gửi chunk; metadata giới hạn kích thước/tên.
+- [ ] Client nhận tự kiểm tra META, chuẩn bị nơi lưu rồi gửi FILE_ACCEPT; không có nút Accept/Reject.
+- [ ] Sender đợi FILE_ACCEPT trước chunk; metadata giới hạn kích thước/tên.
+- [ ] Login dùng `register_peer(peer, session_id)` và BIND; không tạo khóa giả.
 - [ ] Chunk có `chunk_index`; không dùng tên file để định danh transfer; dùng `stream_id`.
 - [ ] Nhận file vào `.part`; chỉ đổi tên sau khi đủ byte và SHA-256 khớp.
 - [ ] Tên file từ mạng không được chứa đường dẫn để ghi ngoài thư mục nhận.
 - [ ] Lỗi ghi file/dung lượng/hủy truyền báo rõ; không hiển thị thành công giả.
 - [ ] Gửi bằng số tác vụ giới hạn để tận dụng window; không tạo hàng triệu task.
 - [ ] Kết thúc file chờ xác nhận ứng dụng từ người nhận, không chỉ ACK từ server.
-- [ ] Mật mã dùng thư viện chuẩn; không tự viết AES; không commit khóa/cert private.
-- [ ] Báo cáo rõ bảo vệ theo từng chặng client–server, không gọi là end-to-end encryption.
+- [ ] Không gọi PayloadCipher hoặc bắt buộc cài cryptography trong bản đầu.
+- [ ] Báo cáo rõ chưa có TLS/HMAC/AES; session/endpoint và SHA-256 không thay xác thực mật mã.
 
 ## Phụ thuộc và cách không bị chờ
 

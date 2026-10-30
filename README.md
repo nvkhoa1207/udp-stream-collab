@@ -6,15 +6,20 @@ truyền file tin cậy qua UDP trong mạng LAN.
 
 **Thành viên:** Nguyễn Việt Khoa và Hải.
 
-**Cập nhật:** 21/10/2026.
+**Cập nhật:** 29/10/2026 — nhánh tích hợp `hai/server-transport`.
 
 **Định hướng:** làm đơn giản, bám đề và phản hồi giảng viên; ưu tiên chạy đúng,
 kiểm thử được và giải thích được code.
 
-> **Dự án đang phát triển.** Đã có model, mock, chia file và một số chức năng
-> client/file local. Server TCP/UDP, transport tin cậy và HTTP bridge còn TODO.
-> Hiện chạy được các demo bên dưới; chưa có ứng dụng chat/file hoàn chỉnh qua
-> mạng thật. Phần “thiết kế” không đồng nghĩa với phần “đã triển khai”.
+Giao diện và thông báo chương trình dùng **tiếng Anh**; comment giải thích bằng
+**tiếng Việt**. Code UI đã tách hàm và định dạng lại để dễ đọc, xem
+[hướng dẫn UI](ui/README.md). Các luồng đăng nhập, chat, tự nhận/hủy file và
+thuật toán truyền UDP giữ nguyên.
+
+> **Đã ghép ứng dụng mạng thật.** TCP login, UDP chat/file, Selective Repeat,
+> flow control, CUBIC rút gọn và HTTP/UI đã chạy trên Windows loopback.
+> 20 client, file tới 16 MiB, 140 file nối tiếp và fault injection đã có kết quả.
+> LAN hai máy và Docker/netem chưa chạy; xem mục 9 và báo cáo Hải.
 
 ## 1. Yêu cầu BTL và phạm vi thực hiện
 
@@ -132,7 +137,7 @@ nghiệp vụ. Client gửi đến server; server tra phiên để chọn đích
 
 ## 4. Luồng hoạt động
 
-Các luồng dưới đây là hướng triển khai; mục 7 ghi riêng phần đã có code.
+Các luồng dưới đây đã nối vào ứng dụng; bằng chứng và giới hạn ở mục 9.
 
 ### Đăng nhập và online
 
@@ -156,7 +161,11 @@ thông điệp hoàn chỉnh.
 3. Server xác định sender từ phiên hợp lệ, kiểm tra người nhận rồi chuyển tiếp.
 4. `recipient="*"`: gửi đến các client online khác; người gửi hiển thị bản tin
    của mình. Username cụ thể: chỉ gửi đến người đó.
-5. Client nhận phát event `message`; UI hiển thị nội dung bằng `textContent`.
+5. Runtime lưu cả tin gửi và tin nhận trong hàng đợi tối đa 512 event ở RAM;
+   UI lấy cùng nguồn này khi polling hoặc F5, hiển thị bằng `textContent`.
+   Tin gửi hiện `Send requested`, không coi ACK là đã giao đến người nhận.
+   Đăng nhập thành công bằng tài khoản khác sẽ xóa lịch sử RAM và danh sách
+   Download của tài khoản trước trên client đó; không xóa file đã lưu trên đĩa.
 
 Tin nhắn giới hạn **480 byte UTF-8**, không phải 480 ký tự. ACK từ server chỉ
 xác nhận chặng đến server, không chứng minh người nhận đã nhận/đọc. Nếu đích
@@ -192,7 +201,7 @@ Client gửi                 Server                  Client nhận
 
 ## 5. UDP tin cậy và xử lý đồng thời
 
-Đây là phần cốt lõi cần giữ đầy đủ dù nghiệp vụ và giao diện được giản lược.
+Phần cốt lõi đã có trong transport dùng chung giữa client và server.
 
 | Cơ chế | Cần đạt |
 |---|---|
@@ -210,10 +219,16 @@ CUBIC cần thể hiện cửa sổ tăng theo hàm bậc ba của thời gian, 
 xử lý timeout. Fixed window hoặc chỉ retry chưa phải CUBIC. Ghi rõ phần giản
 lược và đo kết quả; tham khảo [RFC 9438](https://www.rfc-editor.org/rfc/rfc9438.html).
 
-Các điểm cần chốt khi ghép:
+Các quy ước đã chốt và việc cần làm khi ghép:
 
-- `Packet` hiện chưa có trường receiver window. Cần thống nhất thông tin báo
-  khả năng nhận và cách phục hồi khi bản cập nhật cửa sổ bị mất; không bỏ flow control.
+- `Packet.recv_limit` báo sequence tối đa được nhận, đơn vị packet, trên ACK
+  và `WINDOW_UPDATE`; `WINDOW_PROBE` hỏi lại khi hết credit hoặc mất cập nhật.
+  Hợp đồng chi tiết ở [protocol mục 6](docs/01_PROTOCOL.md#6-flow-control-đã-chốt-recv_limit-theo-packet);
+  model, codec và hành vi transport đã ghép/test qua UDP thật.
+- Stream kết thúc trả buffer ACTIVE, giữ dấu CLOSED nhỏ đến hết phiên; quy
+  ước quota/lifecycle ở protocol mục 6.1 đã triển khai và kiểm thử.
+- `register_peer(peer, session_id)` không còn yêu cầu khóa; client gọi sau
+  AUTH_OK, server gọi sau BIND hợp lệ. Mapping đăng ký và bootstrap mạng thật đã triển khai.
 - Một vòng nhận ở mỗi client dispatch chat/user/file/error. Không để từng tác
   vụ chờ file tự tranh `receive()` rồi lấy mất gói của nhau.
 - `send()` thật chờ ACK; gọi tuần tự từng chunk sẽ thành stop-and-wait. Dùng số
@@ -230,15 +245,18 @@ chưa được tối ưu qua đo và không phải ngưỡng bắt buộc của 
 |---|---|
 | TCP / UDP server | 9000 / 9001 |
 | Datagram tối đa | 1200 byte |
-| Body trước envelope/mã hóa dự kiến | 1100 byte |
+| Body JSON (bản đầu không có envelope mã hóa) | 1100 byte |
 | Payload/chunk tối đa | 480 byte |
 | Record TCP tối đa | 64 KiB |
 | Heartbeat / offline timeout | 3 giây / 10 giây |
 | Retry timeout ban đầu / retry tối đa | 0,5 giây / 8 lần |
-| Cửa sổ khởi đầu | 8 packet |
+| Cửa sổ congestion khởi đầu | 8 packet |
+| Cửa sổ nhận mỗi stream | 8 packet |
+| Nhịp probe / timeout không tăng credit | 1 giây / 10 giây |
+| Tổng stream có buffer mỗi transport | 128 |
 
-Codec phải đo byte sau serialize và phần bao ngoài thực tế. Payload nhỏ không
-tự bảo đảm cả datagram vừa giới hạn. Metadata, user list và lỗi cũng phải vừa
+Bản đầu không có envelope mã hóa; codec phải đo byte sau serialize thực tế.
+Payload nhỏ không tự bảo đảm cả datagram vừa giới hạn. Metadata, user list và lỗi cũng phải vừa
 gói; danh sách online cần chia trang khi vượt giới hạn.
 
 ## 6. Bảo mật trong phạm vi đơn giản
@@ -248,7 +266,7 @@ Mã hóa payload được để ngoài phạm vi đầu theo phản hồi đã g
 bắt buộc** của bản đơn giản này. Nếu chọn thêm thì phải triển khai, kiểm thử và
 mô tả đúng phạm vi bảo vệ.
 
-Những việc vẫn cần làm:
+Các biện pháp đã triển khai trong phạm vi bản đầu:
 
 - Kiểm tra tài khoản; không lưu mật khẩu plaintext trong file tài khoản, dùng
   hàm băm mật khẩu có salt bằng thư viện phù hợp. Không log password/khóa.
@@ -264,214 +282,145 @@ Nếu chưa bảo vệ kênh đăng nhập hoặc xác thực packet bằng mậ
 hạn; không tuyên bố chống nghe lén hay giả mạo chủ động. Phần bảo mật hiện chưa
 được nghiệm thu.
 
-## 7. Tiến độ thực tế
+## 7. Trạng thái bản tích hợp
 
-Đối chiếu ngày **21/10/2026**, GitHub `main` ở commit
-[`463c8b3`](https://github.com/nvkhoa1207/udp-stream-collab/commit/463c8b30ab245cd0b7b7049450d639e5708a9a73).
-Bản local có các thay đổi chưa được commit; clone GitHub tại mốc này chưa có
-đầy đủ code trên máy Khoa.
+- Codec UDP JSON/base64 strict, TCP length-prefix; hash mật khẩu PBKDF2 với salt.
+- TCP HELLO/AUTH, phiên chờ BIND, username trùng, timeout và dọn phiên định kỳ.
+- UDP cùng socket suốt phiên, BIND idempotent, kiểm tra sender/session/IP/endpoint.
+- Selective ACK, retry/backoff hữu hạn, reorder/dedup, receive window 8 packet,
+  probe/stall deadline, ACTIVE/DRAINING/CLOSED và tombstone đến hết phiên.
+- CUBIC rút gọn dùng byte budget chung mỗi peer, pacing và recovery flight.
+- Server relay chat/file, USER_LIST phân trang/revision, heartbeat/offline/logout.
+- Client tự nhận file, kiểm tra size/hash, progress, hủy hai chiều; HTTP polling/UI thật.
+- Không còn stub trên đường chạy bắt buộc. `security/cipher.py` là mở rộng tùy chọn,
+  không được gọi. [Báo cáo Khoa](reports/KHOA_REPORT.md) được giữ nguyên như bàn giao;
+  [báo cáo Hải](reports/HAI_REPORT.md) ghi phần ghép và kết quả mạng mới.
 
-| Thành phần | GitHub tại commit trên | Local đã kiểm tra |
-|---|---|---|
-| Packet, MessageType, ReceivedPacket, Transport | Có | Có |
-| MemoryHub, MemoryTransport | Có | Có |
-| `iter_chunks()`, `build_metadata()` | Có | Có |
-| FileReceiver begin/accept_chunk/finish | TODO | Đã ghép chunk, bỏ trùng, kiểm tra size/hash |
-| ClientService send_chat | TODO | Đã tạo/gửi MSG qua transport |
-| ClientService receive_events | TODO | Đã xử lý MSG/event queue; chưa đủ user/file/error |
-| ClientService login/send_file | TODO | TODO |
-| Codec, server/auth/session/router | TODO | TODO |
-| ReliableUdpTransport, CongestionController | TODO | TODO |
-| `ui/index.html`, `ui/app.js` | Fixture, nút disabled | Fixture, nút disabled |
-| HTTP bridge, PayloadCipher | TODO | TODO |
-| demo_mock, demo_file_chunks | Có | Có |
-| demo_client_chat, demo_file_receiver | Chưa có | Có, chưa commit |
+## 8. Chạy trên Windows PowerShell
 
-FileReceiver/chat local mới chứng minh xử lý cơ bản, chưa đủ để đánh dấu hoàn
-tất toàn bộ K2/K3/K4. Bản xem thử giao diện trong `output/` cũng không phải UI
-đã nối vào ứng dụng.
+Yêu cầu Python 3.11+ và thư viện chuẩn, không cần framework hoặc dependency bổ sung.
+Mở ba cửa sổ PowerShell trong thư mục repo. Dùng Python trong `.venv` trực tiếp,
+không cần đổi ExecutionPolicy. Nếu chưa có môi trường: `py -3 -m venv .venv`.
+Nhánh đã ghép là `hai/server-transport`, không mặc định `main` đã có code mới.
 
-## 8. Cài đặt và chạy phần hiện có
-
-Yêu cầu **Python 3.11+** và Git. Chạy lệnh ở thư mục gốc project. Các demo hiện
-có chỉ dùng thư viện chuẩn, chưa cần `cryptography`.
-
-### Lấy code và tạo môi trường
-
-Nếu chưa có repo:
-
-```bash
-git clone https://github.com/nvkhoa1207/udp-stream-collab.git
-cd udp-stream-collab
-```
-
-Nếu đã có repo, mở terminal ở thư mục hiện có; không clone đè hoặc reset phần
-đang làm để lấy tài liệu mới.
-
-macOS/Linux:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python --version
-```
-
-Windows PowerShell:
+Cửa sổ 1 — server:
 
 ```powershell
-py -3 -m venv .venv
-.venv\Scripts\Activate.ps1
-python --version
+.\.venv\Scripts\python.exe -m server.main --host 127.0.0.1 --tcp-port 9000 --udp-port 9001
 ```
 
-Nếu PowerShell không cho chạy script activate, dùng trực tiếp
-`.venv\Scripts\python.exe` thay cho `python` trong các lệnh demo.
+Server hỏi mật khẩu demo cho `hai` rồi `khoa` bằng getpass. Tự đặt mật khẩu
+1–128 ký tự; chỉ giữ hash có salt trong RAM. Không đưa password vào lệnh hay file.
 
-`requirements.txt` hiện có `cryptography` cho cipher dự kiến. Chỉ cài khi triển
-khai/chạy chức năng sử dụng thư viện đó:
+Cửa sổ 2 — client Hải:
 
-```bash
-python -m pip install -r requirements.txt
+```powershell
+.\.venv\Scripts\python.exe -m client.main --http-port 8000 --received-dir data/received-hai
 ```
 
-### Demo có trong commit GitHub đã kiểm tra
+Cửa sổ 3 — client Khoa:
 
-```bash
-python -m scripts.demo_mock
-python -m scripts.demo_file_chunks
+```powershell
+.\.venv\Scripts\python.exe -m client.main --http-port 8001 --received-dir data/received-khoa
 ```
 
-| Demo | Kết quả mong đợi | Phạm vi |
-|---|---|---|
-| demo_mock | In `OK hợp đồng mock` | Chuyển Packet qua queue trong một process; không gọi ClientService |
-| demo_file_chunks | Chunk 480, 480, 40 byte; `Hash giống nhau: True` | Chia/ghi nối tiếp file 1000 byte; không gọi FileReceiver |
+Mở [client Hải](http://127.0.0.1:8000) và [client Khoa](http://127.0.0.1:8001).
+Nhập server `127.0.0.1`, TCP `9000`, username và mật khẩu vừa đặt trên server.
+Sau BIND mới có online/chat/file. Chọn `Everyone` để chat chung hoặc username để
+chat riêng/gửi file. Số online tính cả bản thân; dòng `(You)` bị khóa để tránh tự gửi.
+File tự nhận; không cần bấm Accept. Sender chỉ `Completed`
+sau COMPLETE đúng size/hash; byte ACK đến server chưa chứng minh người nhận đã lưu.
+Nút `Cancel` có ở cả phía gửi và nhận khi lượt còn hủy được. File nhận hoàn tất
+có nút `Download`. Ctrl+C đóng từng chương trình.
 
-`demo_file_chunks` tạo/ghi đè `data/demo_original.bin` và `data/demo_copy.bin`.
-Đây là file thử của demo, không dùng chúng để giữ dữ liệu riêng.
+macOS/Linux dùng `python3 -m venv .venv`, sau đó `.venv/bin/python -m ...` với
+cùng tham số. Bản này mới được đo trên Windows/Python 3.13; Docker/Linux chưa chạy.
 
-### Demo bổ sung ở local
+### Hai máy LAN — chưa nghiệm thu
 
-Chỉ chạy khi có hai script và phần client/file tương ứng. Tại mốc GitHub ở
-mục 7, hai script này chưa được commit nên chưa có khi clone repo.
+Máy server chạy `--host 0.0.0.0`. Hai client nhập cùng IP LAN của máy server,
+TCP 9000; UDP 9001 được cấp qua AUTH_OK. Mỗi browser vẫn mở `127.0.0.1` trên
+máy của mình. Bridge không nghe LAN. Nếu firewall chặn, người vận hành cho phép
+Python/server nhận TCP 9000 và UDP 9001 trên mạng Private; không mở HTTP ra LAN.
+Chạy thử login, chat chung/riêng, binary 1 MiB, hủy và mất kết nối; so SHA-256
+bằng `Get-FileHash -Algorithm SHA256 <file>`, ghi log/kết quả vào nghiệm thu.
+Chi tiết [Windows/LAN/Docker](docs/07_WINDOWS_LAN_DOCKER.md).
 
-```bash
-python -m scripts.demo_client_chat
-python -m scripts.demo_file_receiver
+## 9. Kiểm thử và bằng chứng
+
+```powershell
+$env:BTL_NETWORK_TEST = '1'
+.\.venv\Scripts\python.exe -m unittest discover -s tests -q
+.\.venv\Scripts\python.exe -m scripts.verify_demos
+.\.venv\Scripts\python.exe -m scripts.network_acceptance --clients 20 --sizes 1024,1048576,10485760,16777216 --streams 140
+.\.venv\Scripts\python.exe -m scripts.network_acceptance --clients 3 --sizes 65536 --streams 2 --loss 0.07 --delay 0.006 --seed 7
 ```
 
-| Demo | Kết quả mong đợi | Phạm vi |
-|---|---|---|
-| demo_client_chat | friend nhận tin từ khoa | Gọi send_chat, receive_events và event queue; server vẫn chuyển tiếp giả |
-| demo_file_receiver | Thứ tự `2, 0, 0, 1`, có 3 chunk khác nhau; hash khớp | Dùng FileReceiver để thử chunk trùng/sai thứ tự trên đĩa |
+Nếu không đặt BTL_NETWORK_TEST, một test TCP tùy chọn của Khoa bị skip; các test
+TCP/UDP server nhóm vẫn chạy. Các harness tạo tài khoản thử và file trong thư mục
+tạm, kiểm tra hash/size/cleanup rồi tự dọn. `verify_demos` chạy 11 lượt demo cũ
+trong thư mục tạm, không ghi đè `data/` cá nhân; demo chỉ chứng minh mock/đĩa local.
 
-`demo_file_receiver` tạo/ghi đè `data/demo_original.bin`, lưu kết quả ở
-`data/received/`, mỗi lần chạy dùng transfer ID mới. Cả bốn demo **không mở
-socket TCP/UDP**, không kiểm tra mất gói hoặc chứng minh truyền qua LAN.
+Kết quả đo Windows loopback (29/10/2026), 20 client trong cùng process:
 
-### Entrypoint server/client
-
-Hiện chỉ xem được tham số:
-
-```bash
-python -m server.main --help
-python -m client.main --help
-```
-
-Chạy server hoặc client thật hiện kết thúc với exit code 2 và thông báo chưa
-triển khai. Chưa có tài khoản đăng nhập thật, HTTP bridge đang nghe hoặc lệnh
-chạy ứng dụng hoàn chỉnh để hướng dẫn. Khi ghép xong, mục này phải được thay
-bằng lệnh chạy thật, cách tạo tài khoản demo, địa chỉ UI và cách thử hai máy LAN
-đã được kiểm chứng.
-
-## 9. Kiểm thử và nghiệm thu
-
-### Kết quả đã kiểm tra ngày 21/10/2026
-
-- Cú pháp 28 file Python: đạt.
-- Bốn demo local ở mục 8: chạy thành công.
-- File 1000 byte chia 480/480/40 byte: hash khớp.
-- FileReceiver nhận `2, 0, 0, 1`: có 3 chunk khác nhau, hash khớp.
-- Hai lệnh `--help`: chạy được; hai entrypoint thực tế vẫn báo chưa triển khai.
-
-Đây là kiểm tra local trên macOS, không phải nghiệm thu mạng hoặc xác nhận
-mọi hệ điều hành. Không suy rộng thành đã đạt tất cả kiểm tra đầu vào, bảo mật
-hoặc file lớn.
-
-### Những kiểm thử cần hoàn thành
-
-| Nhóm | Tình huống | Kết quả cần đạt |
-|---|---|---|
-| Đăng nhập/phiên | Đúng/sai mật khẩu, trùng username, ngắt kết nối | Trạng thái/lỗi đúng; server tiếp tục chạy |
-| Online/chat | 3 client, chat chung/riêng | Online cập nhật, private không đến người thứ ba, không nhân đôi tin |
-| File | File rỗng, nhị phân, tên tiếng Việt, 1 KiB/1 MiB/10 MiB | Nhận tự động, đúng byte/size/hash, chỉ hoàn tất sau xác nhận cuối |
-| Reliability | Mất DATA và ACK, gói trùng/sai thứ tự | Retry đúng, không hỏng dữ liệu, hết retry có lỗi rõ |
-| Flow/congestion | Receiver chậm, loss/delay, ACK trùng | Buffer hữu hạn, cửa sổ đúng, log thể hiện thuật toán đã chọn |
-| Đồng thời | Chat khi file gặp loss; 10 rồi 20 client | Stream tiếp tục hoạt động, đo latency và tài nguyên thực tế |
-| Lỗi/bảo mật | Session sai, gói quá lớn, tên chứa `../`, thiếu chunk/hash sai, lỗi ghi | Từ chối phù hợp; không ghi ra ngoài hoặc báo thành công giả |
-| UI | Login, online, chat, chọn file, progress và lỗi | Thao tác được, phản ánh core, không đứng khi truyền file |
-| Cài đặt | Chạy từ README trên máy còn lại | Làm được từ đầu, không cần chỉ dẫn ngoài README |
-
-Mất gói 5–10%, độ trễ và các kích thước file trên là kịch bản nhóm chọn, không
-phải ngưỡng điểm của đề. Dùng socket thật, fault injection có seed; lưu cấu hình,
-hash, log và PASS/FAIL. Cập nhật [bảng nghiệm thu](docs/04_ACCEPTANCE.md) bằng kết
-quả đã chạy. Các mục AES/tag chỉ áp dụng khi có cơ chế tương ứng, không tự biến
-phần mã hóa đã được giản lược thành bắt buộc trở lại.
-
-## 10. Thứ tự triển khai tiếp theo
-
-1. Đồng bộ client/file và hai demo local để cả hai dùng cùng bản nền.
-2. Chốt codec, session/BIND, thông tin cửa sổ nhận và API chung; ưu tiên giữ
-   cấu trúc hiện có, chỉ thêm trường/hàm khi cơ chế thực tế cần.
-3. Ghép handshake TCP, đăng nhập, online và chat chung/riêng qua UDP thật.
-4. Hoàn thiện ACK/retry/window và file tự động từ META đến COMPLETE.
-5. Ghép flow/congestion control, các stream độc lập và HTTP UI đơn giản.
-6. Nghiệm thu, sửa lỗi, đo 10–20 client, hoàn thiện hướng dẫn chạy và báo cáo.
-
-Đây là thứ tự phát triển, không thay thế yêu cầu cuối cùng. UDP chưa có đủ
-reliability/flow/congestion control chỉ là bản trung gian, chưa phải bản đủ để nộp.
-
-## 11. Một số tình huống khi chạy demo
-
-| Hiện tượng | Cách kiểm tra |
+| Kịch bản | Kết quả |
 |---|---|
-| `No module named scripts...` | Chạy ở thư mục gốc bằng `python -m ...`; kiểm tra hai demo local đã được đồng bộ chưa |
-| `NotImplementedError` | Đã gọi phần TODO; xem tiến độ, không coi là lỗi cài thư viện |
-| Server/client thoát ngay | Entrypoint chưa triển khai; `--help` chỉ hiển thị tham số |
-| UI có dữ liệu mẫu, nút disabled | Fixture chưa có bridge và chưa nối core |
-| File thử thay đổi sau demo | Hai demo file có tạo/ghi đè demo_original.bin, như ghi ở mục 8 |
+| Online, broadcast, nhiều sender nhắn riêng cùng đích | PASS, 20 client |
+| File 1 MiB / 10 MiB / 16 MiB | Đúng hash/size; 5,809 / 55,780 / 83,699 giây |
+| Chat xen các file trên | 10,87 / 12,56 / 19,23 ms trong lần đo |
+| Thêm 140 file rỗng nối tiếp | PASS; kết thúc 288 tombstone, không giữ buffer file |
+| Đủ quota 4096 file, logout/reconnect cả hai client, file mới | PASS, 109,243 giây; control không bị quota file chặn |
+| Sau tải / shutdown | 0 pending, 0 relay transfer, 0 relay failure; state phiên/worker được dọn |
+| Fault seed 7, loss 7%, delay/reorder 6 ms, file 64 KiB | PASS, 3,119 giây; 96 drop, 29 duplicate/1145 lượt gửi; chat 154,66 ms |
+| Browser và HTTP | Login, online, chat, upload 1200 byte, completed hai phía; hủy sender/receiver đã thao tác |
 
-Không cần mở firewall hoặc đổi thiết lập mạng để chạy demo bộ nhớ. Hướng dẫn
-cổng/firewall cho LAN sẽ bổ sung cùng lệnh chạy mạng thật sau kiểm thử.
+Số đo chỉ là một lần chạy, không phải percentile, cam kết throughput hoặc số liệu
+LAN. Faults được bơm quanh socket write; datagram còn lại đi UDP thật nhưng đây
+không phải netem. CUBIC được kiểm tra bằng clock unit test và đường truyền có
+loss/delay; không tuyên bố tương đương đầy đủ RFC 9438.
 
-## 12. Tài liệu và bản nộp
+[Kiểm tra UI cuối ngày 30/10/2026](docs/06-final-ui-review.md) ghi riêng bằng chứng
+browser, lỗi Cancel, lịch sử sau F5 và kết quả 222 test (gồm 20 client × hai vòng × 380 tin).
 
-| Tài liệu | Nội dung |
+[Bảng T01–T22](docs/04_ACCEPTANCE.md) phân biệt bằng chứng mạng thật, unit test,
+mock và phần chưa chạy. Docker CLI có sẵn nhưng Engine không chạy trên máy này;
+Compose đã kiểm tra cú pháp. LAN hai máy và cài từ đầu trên máy còn lại chưa chạy.
+
+## 10. Docker/netem chuẩn bị sẵn — chưa chạy Engine
+
+```powershell
+docker compose build
+docker compose run --rm --service-ports --name btl-server server
+# Terminal khác, sau khi bật Docker Desktop/Linux Engine:
+docker compose --profile test run --rm netem
+```
+
+Server container vẫn hỏi mật khẩu demo; hai client Windows chạy như mục 8.
+Service netem chỉ có NET_ADMIN trong container test, áp loss/delay/duplicate/
+reorder lên loopback của container rồi chạy client/server thật. Không sửa qdisc
+trên host. Hướng dẫn đầy đủ và nguồn tham khảo ở docs/07_WINDOWS_LAN_DOCKER.md.
+
+## 11. Xử lý lỗi thường gặp
+
+| Hiện tượng | Kiểm tra |
 |---|---|
-| [Giao thức](docs/01_PROTOCOL.md) | Packet và luồng truyền đề xuất |
-| [API chung](docs/02_API.md) | Hợp đồng client/server/transport |
-| [Quy trình Git](docs/03_GIT_WORKFLOW.md) | Nhánh và cách ghép code |
-| [Nghiệm thu](docs/04_ACCEPTANCE.md) | Các trường hợp kiểm tra và bằng chứng |
-| [TODO Hải](TODO_BAN_A.md) | Server và transport |
-| [TODO Khoa](TODO_KHOA.md) | Client, file và UI |
-| [Kế hoạch ban đầu](TODO_5_NGAY.md) | Lịch nội bộ, không phải thời hạn đề quy định |
-| [Định hướng UI](ui/README.md) | HTTP bridge và giao diện |
-| [Dàn ý báo cáo](reports/REPORT_OUTLINE.md) | Nội dung báo cáo PDF |
+| Port đã được dùng | Đóng instance cũ hoặc dùng cổng khác; TCP/UDP server và HTTP client có cờ riêng |
+| Login bị từ chối | Kiểm tra tài khoản/mật khẩu, username đã online; chờ hết phiên cũ tối đa 10 giây |
+| BIND timeout | Kiểm tra UDP 9001, IP server, firewall; TCP thông chưa có nghĩa UDP thông |
+| `Failed to fetch` | HTTP bridge đã dừng hoặc cổng sai; chạy lại client và reload tab để nhận token mới |
+| Phiên mất kết nối | Đăng xuất rồi đăng nhập lại; phiên mới dùng ClientService/socket mới |
+| File lỗi/hủy | Xem snapshot và cleanup_pending; không suy từ 100% byte ra thành công |
+| `No module named ...` | Chạy từ thư mục gốc repo bằng `python -m ...` |
 
-**Phạm vi trong README này là định hướng mới nhất của nhóm.** Các TODO, protocol,
-tài liệu UI và bản đề xuất `docs/05_THIET_KE_TONG_THE.md` có thể còn nội dung cũ
-hoặc mở rộng: Accept/Reject thủ công, TLS/HMAC/AES bắt buộc, receipt chat hoặc
-module/API bổ sung. Những phần đó chưa được coi là quyết định triển khai. Khi
-sửa module liên quan, cập nhật tài liệu theo phạm vi ở đây; `FILE_ACCEPT` được
-hiểu là xác nhận tự động của chương trình.
+## 12. Tài liệu và bàn giao
 
-Theo đề, nộp ZIP hoặc liên kết GitHub private, chứa:
+[Giao thức](docs/01_PROTOCOL.md), [API](docs/02_API.md),
+[thiết kế](docs/05_THIET_KE_TONG_THE.md), [tiến độ](docs/06_TIEN_DO.md),
+[Windows/LAN/Docker](docs/07_WINDOWS_LAN_DOCKER.md),
+[nghiệm thu](docs/04_ACCEPTANCE.md), [Git workflow](docs/03_GIT_WORKFLOW.md),
+[phần Hải](reports/HAI_REPORT.md), [phần Khoa](reports/KHOA_REPORT.md).
 
-1. Source client/server và các thành phần cần để chạy.
-2. README hướng dẫn cài đặt, chạy server, kết nối client và demo chức năng.
-3. Báo cáo PDF: kiến trúc, đặc tả giao thức, sequence diagram cho chat/file và
-   khoảng một trang **Challenges & Solutions**. Bổ sung phân công và kết quả
-   kiểm thử thật để giải thích phần đã làm.
-
-Trước khi nộp, thử lại trên máy còn lại và kiểm tra hình thức nộp/trạng thái repo.
-Không đưa `.venv`, dữ liệu cá nhân, mật khẩu, private key hoặc khóa phiên vào
-bản nộp. Báo cáo ghi đúng tính năng đã chạy và giới hạn còn lại.
+Bản đầu chưa có TLS/HMAC/mã hóa payload theo phạm vi nhóm đã chốt. Session/IP/port
+và SHA-256 không thay xác thực mật mã. Không commit `.venv`, mật khẩu, file thử
+hoặc output sinh ra. Báo cáo Hải là Markdown để ghép với phần Khoa; báo cáo PDF
+nhóm cuối cùng và ảnh/LAN từ máy còn lại cần ghép trước khi nộp.

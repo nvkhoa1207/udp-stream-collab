@@ -17,9 +17,9 @@ def main():
     # Đọc thông tin file gốc.
     metadata = build_metadata(original)
 
-    print("Tên file:", metadata["name"])
-    print("Kích thước:", metadata["size"], "byte")
-    print("Số chunk:", metadata["total_chunks"])
+    print("File name:", metadata["name"])
+    print("Size:", metadata["size"], "byte")
+    print("Chunk count:", metadata["total_chunks"])
 
     # Đọc từng chunk từ file gốc và ghi vào file mới.
     with copied.open("wb") as file:
@@ -36,7 +36,8 @@ def main():
         metadata["sha256"] == copied_metadata["sha256"]
     )
 
-    print("Hash giống nhau:", same_hash)
+    print("Hashes match:", same_hash)
+    assert same_hash and copied.read_bytes() == original.read_bytes()
 
 
 if __name__ == "__main__":

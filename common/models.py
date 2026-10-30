@@ -1,4 +1,4 @@
-"""Hợp đồng dữ liệu nháp. Hai người thống nhất trước khi thay đổi."""
+"""Các kiểu gói tin dùng chung cho client, server và UDP."""
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -20,6 +20,8 @@ class MessageType(str, Enum):
     FILE_COMPLETE = "FILE_COMPLETE"
     FILE_CANCEL = "FILE_CANCEL"
     ACK = "ACK"
+    WINDOW_UPDATE = "WINDOW_UPDATE"
+    WINDOW_PROBE = "WINDOW_PROBE"
     ERROR = "ERROR"
     LOGOUT = "LOGOUT"
 
@@ -32,14 +34,17 @@ class Packet:
     stream_id: str
     payload: bytes = b""
     message_id: str = field(default_factory=lambda: uuid4().hex)
-    session_id: str = ""  # Real transport gán sau auth; mock không xác thực.
-    seq: int = 0  # 0 ở lớp ứng dụng; real transport gán sequence >= 1.
+    session_id: str = ""  # Được gán sau đăng nhập; bản mock không xác thực.
+    seq: int = 0  # Gói dữ liệu được đánh số từ 1; gói điều khiển dùng 0.
     ack: int | None = None
     chunk_index: int | None = None
     version: int = 1
+    # ACK/WINDOW_UPDATE báo số thứ tự cao nhất mà bên kia được phép gửi.
+    # Giới hạn chỉ tăng lên; None nghĩa là gói này không báo cửa sổ nhận.
+    recv_limit: int | None = None
 
 
 @dataclass(frozen=True)
 class ReceivedPacket:
-    peer: Peer  # Địa chỉ chặng gửi trực tiếp, không phải sender nghiệp vụ.
+    peer: Peer  # Địa chỉ máy gửi trực tiếp; có thể là server chuyển tiếp.
     packet: Packet
