@@ -7,7 +7,7 @@ import threading
 from concurrent.futures import TimeoutError as FutureTimeout
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit, parse_qs
+from urllib.parse import urlsplit, parse_qs, quote
 from ui.runtime import ClientRuntime
 
 MAX_UPLOAD = 16 * 1024 * 1024
@@ -32,7 +32,7 @@ def make_handler(runtime, loop, token):
             super().setup()
             self.connection.settimeout(10)
 
-        def reply(self, status, value, kind='application/json'):
+        def reply(self, status, value, kind='application/json', filename=None):
             data = json.dumps(value).encode() if kind == 'application/json' else value
             self.send_response(status)
             self.send_header('Content-Type', kind)
@@ -40,6 +40,8 @@ def make_handler(runtime, loop, token):
             self.send_header('Cache-Control', 'no-store')
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Content-Security-Policy', CSP)
+            if filename is not None:
+                self.send_header('Content-Disposition', "attachment; filename*=UTF-8''" + quote(filename, safe=''))
             self.end_headers()
             self.wfile.write(data)
 
@@ -98,6 +100,10 @@ def make_handler(runtime, loop, token):
                 url = urlsplit(self.path)
                 if url.path in STATIC_FILES:
                     self.serve_static(url.path)
+                elif url.path == '/api/download' and self.allowed():
+                    transfer_id = parse_qs(url.query)['id'][0]
+                    name, data = self.call(runtime.download(transfer_id))
+                    self.reply(200, data, 'application/octet-stream', filename=name)
                 elif url.path == '/api/events' and self.allowed():
                     after = int(parse_qs(url.query).get('after', ['0'])[0])
                     if after < 0:
@@ -105,6 +111,8 @@ def make_handler(runtime, loop, token):
                     self.reply(200, self.call(runtime.poll(after)))
                 else:
                     self.reply(403, {'error': 'Access denied'})
+            except OSError:
+                self.reply(404, {'error': 'Completed file is unavailable'})
             except (ValueError, KeyError):
                 self.reply(400, {'error': 'Invalid request'})
 

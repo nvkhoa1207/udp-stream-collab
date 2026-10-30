@@ -8,6 +8,28 @@ from common.models import Packet, MessageType, ReceivedPacket
 
 
 class AuthTests(unittest.IsolatedAsyncioTestCase):
+    async def test_client_and_server_reject_sending_to_self(self):
+        from pathlib import Path
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from server.router import Router
+        transport = AsyncMock()
+        client = ClientService(transport, ('localhost', 9001), 'hai')
+        with self.assertRaisesRegex(ValueError, 'yourself'):
+            await client.send_chat('hai', 'hello')
+        with self.assertRaisesRegex(ValueError, 'yourself'):
+            await client.send_file('hai', Path('unused.txt'))
+        transport.send.assert_not_awaited()
+        sessions = Mock()
+        sessions.get.return_value = SimpleNamespace(peer=('localhost', 1234), username='hai')
+        router = Router(transport, sessions)
+        router._error = Mock()
+        for kind in (MessageType.MSG, MessageType.FILE_META):
+            packet = Packet(kind=kind, sender='hai', recipient='hai', stream_id='a' * 32)
+            await router.handle(ReceivedPacket(('localhost', 1234), packet))
+            self.assertEqual(router._error.call_args.args[2], 'SELF_SEND_DISABLED')
+        self.assertFalse(router.transfers)
+
     async def test_logout_cleans_locally_when_server_is_unreachable(self):
         for error in (TimeoutError(), ConnectionError(), OSError()):
             transport = AsyncMock()

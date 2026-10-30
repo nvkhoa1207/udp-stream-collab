@@ -1,5 +1,6 @@
 """Nối các lệnh từ giao diện với một phiên client chạy bằng asyncio."""
 import asyncio
+import re
 from collections import deque
 from pathlib import Path
 from client.service import ClientService
@@ -19,6 +20,8 @@ class ClientRuntime:
         self.pump = None
         self.errors = {}
         self.sending_file = False
+        self.downloads = {}
+        self.users = []
 
     def make_client(self, host, port, username):
         transport = ReliableUdpTransport(('0.0.0.0', 0))
@@ -32,6 +35,16 @@ class ClientRuntime:
         self.sequence += 1
         event = dict(event, id=self.sequence)
         self.events.append(event)
+        if event['type'] == 'users':
+            self.users = list(event['users'])
+        if (event['type'] == 'file' and event.get('direction') == 'receive'
+                and event.get('status') == 'completed'):
+            transfer_id, name = event['transfer_id'], event.get('name', '')
+            if (re.fullmatch('[0-9a-f]{32}', transfer_id) and name
+                    and Path(name).name == name and '\\' not in name):
+                self.downloads[transfer_id] = name
+                while len(self.downloads) > 100:
+                    del self.downloads[next(iter(self.downloads))]
         if event['type'] == 'error':
             self.errors[event.get('scope', 'operation')] = event
 
@@ -66,6 +79,7 @@ class ClientRuntime:
         client = await asyncio.to_thread(self.factory, host, port, username)
         await client.login(body['password'])
         self.client = client
+        self.users = []
         self.errors.pop('session', None)
         self.emit(dict(type='connection', connected=True, username=username))
         self.pump = asyncio.create_task(self.collect())
@@ -156,7 +170,26 @@ class ClientRuntime:
             'connected': connected,
             'errors': list(self.errors.values()),
             'sending_file': self.sending_file,
+            'downloads': list(self.downloads),
+            'username': self.client.username if connected else '',
+            'users': self.users if connected else [],
         }
+
+    async def download(self, transfer_id):
+        # Chỉ tải file đã nhận xong trong runtime này, không nhận đường dẫn từ browser.
+        name = self.downloads.get(transfer_id)
+        if name is None:
+            raise FileNotFoundError('Completed file is unavailable')
+        path = self.directory / (transfer_id + '_' + name)
+        def read():
+            if path.is_symlink() or path.resolve().parent != self.directory.resolve():
+                raise FileNotFoundError('Completed file is unavailable')
+            with path.open('rb') as file:
+                data = file.read(16 * 1024 * 1024 + 1)
+            if len(data) > 16 * 1024 * 1024:
+                raise ValueError('File exceeds download limit')
+            return name, data
+        return await asyncio.to_thread(read)
 
     async def close(self):
         await asyncio.sleep(0)  # Cho job mới vào try/finally trước khi hủy.

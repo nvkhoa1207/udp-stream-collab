@@ -353,6 +353,11 @@ input:disabled, select:disabled, textarea:disabled {
   border-radius: 8px;
 }
 
+.file-footer {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .file-name {
   display: block;
   margin: 8px 0;

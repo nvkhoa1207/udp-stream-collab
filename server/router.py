@@ -198,6 +198,9 @@ class Router:
             self.peer_removed(source)
             self.publish_users()
             return
+        if packet.kind in (MessageType.MSG, MessageType.FILE_META) and packet.recipient == source.username:
+            self._error(source, packet, 'SELF_SEND_DISABLED', 'Choose another recipient')
+            return
         if packet.kind == MessageType.MSG:
             try:
                 if not packet.payload.decode('utf-8').strip():

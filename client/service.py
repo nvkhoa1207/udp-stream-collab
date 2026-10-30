@@ -138,6 +138,8 @@ class ClientService:
     async def send_chat(self, recipient: str, text: str) -> None:
         self._check_session()
         recipient = recipient.strip()
+        if recipient == self.username:
+            raise ValueError('Choose another user; sending to yourself is disabled')
 
         if not recipient or len(recipient) > 32:
             raise ValueError(
@@ -170,6 +172,8 @@ class ClientService:
         self._check_session()
         if type(recipient) is not str or re.fullmatch(r"[A-Za-z0-9_-]{1,32}", recipient) is None:
             raise ValueError("Files must be sent to one valid username")
+        if recipient == self.username:
+            raise ValueError('Choose another user; sending to yourself is disabled')
         if not self._receiving:
             raise RuntimeError("Start receive_events before sending a file")
         if self._file_sender is not None:
@@ -179,6 +183,7 @@ class ClientService:
         sender = FileSender(self.transport, self.server_peer, self.username, recipient,
                             self._file_io, self.file_updates)
         self.file_updates.begin(sender.transfer_id, recipient)
+        self.file_updates.update(sender.transfer_id, name=Path(path).name)
         self._file_sender = sender
         self._sent_file_count += 1
         try:

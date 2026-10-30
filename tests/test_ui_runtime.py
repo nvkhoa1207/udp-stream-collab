@@ -7,6 +7,34 @@ from ui.runtime import ClientRuntime
 
 
 class RuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_download_requires_completed_receive_and_keeps_duplicate_names(self):
+        with tempfile.TemporaryDirectory() as folder:
+            runtime = ClientRuntime(Path(folder))
+            for transfer_id, data in [('a' * 32, b'first'), ('b' * 32, b'second')]:
+                (Path(folder) / (transfer_id + '_same.txt')).write_bytes(data)
+                runtime.emit(dict(type='file', direction='receive', transfer_id=transfer_id,
+                                  status='verifying', name='same.txt'))
+                with self.assertRaises(FileNotFoundError):
+                    await runtime.download(transfer_id)
+                runtime.emit(dict(type='file', direction='receive', transfer_id=transfer_id,
+                                  status='completed', name='same.txt'))
+                self.assertEqual(await runtime.download(transfer_id), ('same.txt', data))
+            self.assertEqual((await runtime.download('a' * 32))[1], b'first')
+            for value in ('../same.txt', 'c' * 32):
+                with self.assertRaises(FileNotFoundError):
+                    await runtime.download(value)
+            (Path(folder) / ('a' * 32 + '_same.txt')).unlink()
+            with self.assertRaises(FileNotFoundError):
+                await runtime.download('a' * 32)
+
+    async def test_online_snapshot_is_empty_when_session_ends(self):
+        runtime = ClientRuntime(Path('.'))
+        runtime.client = AsyncMock(session_id='session', username='hai')
+        runtime.emit(dict(type='users', users=['hai', 'khoa']))
+        self.assertEqual((await runtime.poll(0))['users'], ['hai', 'khoa'])
+        runtime.client.session_id = None
+        self.assertEqual((await runtime.poll(0))['users'], [])
+
     async def test_dismiss_does_not_hide_new_errors_or_replay_old_ones(self):
         runtime = ClientRuntime(Path('.'))
         runtime.emit(dict(type='error', scope='session', message='Old session ended'))

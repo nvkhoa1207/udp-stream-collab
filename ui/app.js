@@ -23,6 +23,8 @@ let cursor = 0;
 let username = '';
 let serverErrors = [];
 const localErrors = new Map();
+let downloads = new Set();
+let onlineKey = '';
 
 function getElement(id) {
   return document.getElementById(id);
@@ -75,13 +77,22 @@ function updateConnection(value) {
     getElement(id).disabled = !connected;
   }
   getElement('login-button').disabled = connected || busy;
-  getElement('send-file').disabled = !connected || uploading || sendingFile;
+  updateSendFile();
   for (const button of getElement('user-list').querySelectorAll('button')) {
     button.disabled = !connected;
   }
   for (const row of fileRows.values()) {
-    row.button.disabled = row.done || !connected;
+    row.button.disabled = !row.canCancel || row.cancelling || !connected;
   }
+}
+
+function updateSendFile() {
+  const everyone = getElement('recipient').value === '*';
+  getElement('send-file').disabled = !connected || uploading || sendingFile || everyone;
+  getElement('file-recipient').textContent = everyone
+    ? 'Files are private. Choose one other online user.'
+    : sendingFile ? 'Wait for the current file to finish or cancel it first.'
+    : 'File recipient: ' + getElement('recipient').value;
 }
 
 // Browser chỉ gọi HTTP bridge. Phần Python mới thực hiện gửi TCP/UDP.
@@ -106,20 +117,22 @@ async function api(path, body) {
 function updateRecipient() {
   const recipient = getElement('recipient').value;
   getElement('chat-recipient').textContent = recipient === '*' ? 'To everyone' : 'To ' + recipient;
-  getElement('file-recipient').textContent = recipient === '*'
-    ? 'Choose one recipient to send a file.'
-    : 'File recipient: ' + recipient;
   for (const button of getElement('user-list').querySelectorAll('button')) {
     button.setAttribute('aria-pressed', String(button.dataset.username === recipient));
   }
+  updateSendFile();
 }
 
 function updateUsers(users) {
+  const key = JSON.stringify([username, users]);
+  if (onlineKey === key) return;
+  onlineKey = key;
   const select = getElement('recipient');
   const selected = select.value;
   select.replaceChildren();
   getElement('user-list').replaceChildren();
   getElement('user-count').textContent = String(users.length);
+  users = users.filter(name => name !== username);
 
   for (const name of ['*', ...users]) {
     const label = name === '*' ? 'Everyone' : name;
@@ -208,20 +221,51 @@ function createFileRow(event) {
     details: createElement('span', 'file-details'),
     warning: createElement('p', 'file-warning'),
     button: createElement('button', 'cancel-button', 'Cancel'),
+    download: createElement('button', 'download-button', 'Download'),
+    canCancel: false,
+    cancelling: false,
     done: false
   };
   row.button.type = 'button';
   row.button.onclick = async () => {
+    row.cancelling = true;
+    row.button.disabled = true;
     try {
       await api('/api/cancel', {direction: event.direction, transfer_id: event.transfer_id});
     } catch (error) {
-      showError(error);
+      row.warning.textContent = error.message;
+    } finally {
+      row.cancelling = false;
+      row.button.disabled = !row.canCancel || !connected;
+    }
+  };
+  row.download.type = 'button';
+  row.download.hidden = true;
+  row.download.onclick = async () => {
+    row.download.disabled = true;
+    try {
+      const response = await fetch('/api/download?id=' + encodeURIComponent(event.transfer_id), {
+        headers: {'X-Client-Token': token}
+      });
+      if (!response.ok) {
+        throw new Error((await response.json()).error || 'Download failed');
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = row.name.textContent;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      row.warning.textContent = error.message;
+    } finally {
+      row.download.disabled = false;
     }
   };
   const header = createElement('div', 'file-header');
   header.append(row.peer, row.status);
   const footer = createElement('div', 'file-footer');
-  footer.append(row.details, row.button);
+  footer.append(row.details, row.button, row.download);
   row.item.append(header, row.name, row.progress, footer, row.warning);
   getElement('files').append(row.item);
   return row;
@@ -236,8 +280,12 @@ function updateFile(event) {
   const bytes = event.direction === 'send' ? event.acknowledged_bytes : event.received_bytes;
   const total = event.total_bytes;
   row.done = terminalStatuses.has(event.status);
+  row.canCancel = !row.done && event.cancel_delivery !== 'pending'
+    && !(event.direction === 'receive' && event.status === 'verifying');
+  row.transferId = event.transfer_id;
+  row.received = event.direction === 'receive' && event.status === 'completed';
   row.name.textContent = event.name || event.transfer_id.slice(0, 8);
-  row.peer.textContent = event.direction === 'send' ? 'To ' + event.recipient : 'From ' + event.sender;
+  row.peer.textContent = event.direction === 'send' ? 'Sending to ' + event.recipient : 'Receiving from ' + event.sender;
   row.status.textContent = statusLabels[event.status] || event.status;
 
   let statusClass = 'status-active';
@@ -276,7 +324,8 @@ function updateFile(event) {
     warnings.push(event.message);
   }
   row.warning.textContent = warnings.join(' ');
-  row.button.disabled = row.done || !connected;
+  row.button.disabled = !row.canCancel || row.cancelling || !connected;
+  row.download.hidden = !row.received || !downloads.has(event.transfer_id);
 }
 
 function handleEvent(event) {
@@ -291,11 +340,8 @@ function handleEvent(event) {
       updateFile(event);
       break;
     case 'connection':
-      username = event.username || '';
-      updateConnection(event.connected);
       break;
     case 'users':
-      updateUsers(event.users);
       break;
   }
 }
@@ -397,6 +443,7 @@ async function poll() {
     const result = await api('/api/events?after=' + cursor);
     serverErrors = result.errors || [];
     sendingFile = result.sending_file;
+    downloads = new Set(result.downloads || []);
     clearError('bridge');
     if (result.reset) {
       appendMessage(createElement('li', 'message-system', 'Some older events have expired. Showing the remaining history.'));
@@ -406,7 +453,12 @@ async function poll() {
     }
     cursor = result.cursor;
     if (!busy) {
+      username = result.username || '';
       updateConnection(result.connected);
+      updateUsers(result.users || []);
+    }
+    for (const row of fileRows.values()) {
+      row.download.hidden = !row.received || !downloads.has(row.transferId);
     }
   } catch (error) {
     updateConnection(false);
