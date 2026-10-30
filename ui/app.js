@@ -79,7 +79,7 @@ function updateConnection(value) {
   getElement('login-button').disabled = connected || busy;
   updateSendFile();
   for (const button of getElement('user-list').querySelectorAll('button')) {
-    button.disabled = !connected;
+    button.disabled = !connected || button.dataset.username === username;
   }
   for (const row of fileRows.values()) {
     row.button.disabled = !row.canCancel || row.cancelling || !connected;
@@ -132,20 +132,20 @@ function updateUsers(users) {
   select.replaceChildren();
   getElement('user-list').replaceChildren();
   getElement('user-count').textContent = String(users.length);
-  users = users.filter(name => name !== username);
 
   for (const name of ['*', ...users]) {
-    const label = name === '*' ? 'Everyone' : name;
+    const label = name === '*' ? 'Everyone' : name === username ? name + ' (You)' : name;
     const option = document.createElement('option');
     option.value = name;
     option.textContent = label;
+    option.disabled = name === username;
     select.append(option);
 
     const item = document.createElement('li');
     const button = createElement('button', 'user-button', label);
     button.type = 'button';
     button.dataset.username = name;
-    button.disabled = !connected;
+    button.disabled = !connected || name === username;
     button.onclick = () => {
       select.value = name;
       updateRecipient();
@@ -155,7 +155,7 @@ function updateUsers(users) {
   }
 
   // Giữ người đang chọn nếu người đó vẫn còn trong danh sách.
-  if (selected === '*' || users.includes(selected)) {
+  if (selected === '*' || (selected !== username && users.includes(selected))) {
     select.value = selected;
   }
   updateRecipient();
