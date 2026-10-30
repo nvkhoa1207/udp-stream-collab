@@ -32,6 +32,18 @@ class ClientRuntime:
         )
 
     def emit(self, event):
+        if event['type'] == 'file_error':
+            previous = next((item for item in reversed(self.events) if item['type'] == 'file'
+                and item['transfer_id'] == event['transfer_id']
+                and item['direction'] == event['direction']), None)
+            if previous is None:
+                event = dict(type='error', scope='file-operation',
+                    message='File ' + event['transfer_id'] + ': ' + event['message'])
+            else:
+                # File đã lưu xong vẫn giữ Completed; lỗi xác nhận nằm trên chính thẻ đó.
+                status = 'completed' if previous['status'] == 'completed' else (
+                    'cancelled' if event.get('code') == 'FILE_CANCELLED' else 'failed')
+                event = dict(previous, status=status, message=event['message'])
         self.sequence += 1
         event = dict(event, id=self.sequence)
         self.events.append(event)

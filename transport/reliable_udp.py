@@ -1,5 +1,6 @@
 """Gửi UDP có ACK, gửi lại và giới hạn bộ đệm; chưa mã hóa dữ liệu."""
 import asyncio
+from common.errors import StreamClosedError
 import re
 from dataclasses import dataclass, field, replace
 from ipaddress import ip_address
@@ -152,7 +153,7 @@ class ReliableUdpTransport:
                 return
         self._draining.pop(key, None)
         rx = self._rx.pop(key, None)
-        self._fail_stream(key, ConnectionError('Stream closed'))
+        self._fail_stream(key, StreamClosedError('Stream closed'))
         self._tx.pop(key, None)
         self._tombstones[key] = (rx.consumed if rx else 0, success)
 
@@ -323,9 +324,9 @@ class ReliableUdpTransport:
             raise ValueError('Transport owns ACK/window packets')
         key = (peer, packet.stream_id)
         if key in self._tombstones:
-            raise ConnectionError('Stream already closed')
+            raise StreamClosedError('Stream already closed')
         if key in self._draining:
-            raise ConnectionError('Stream draining')
+            raise StreamClosedError('Stream draining')
         if not self._can_reserve(*key):
             raise ValueError('Session stream history quota reached; reconnect')
         if key not in self._tx and len(self._tx) >= 512:

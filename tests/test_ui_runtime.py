@@ -7,6 +7,22 @@ from ui.runtime import ClientRuntime
 
 
 class RuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_file_error_updates_matching_card_without_global_banner(self):
+        runtime = ClientRuntime(Path('.'))
+        for transfer_id in ('a' * 32, 'b' * 32):
+            runtime.emit(dict(type='file', direction='send', transfer_id=transfer_id,
+                              status='sending', name=transfer_id + '.bin'))
+        runtime.emit(dict(type='file_error', direction='send', transfer_id='a' * 32,
+                          code='RELAY_FAILED', message='Relay timeout'))
+        result = await runtime.poll(0)
+        self.assertEqual(result['errors'], [])
+        self.assertEqual(result['events'][-1]['transfer_id'], 'a' * 32)
+        self.assertEqual(result['events'][-1]['status'], 'failed')
+        self.assertEqual(result['events'][1]['status'], 'sending')
+        runtime.emit(dict(type='file_error', direction='send', transfer_id='c' * 32,
+                          message='Unknown old transfer'))
+        self.assertIn('c' * 32, (await runtime.poll(0))['errors'][0]['message'])
+
     async def test_download_requires_completed_receive_and_keeps_duplicate_names(self):
         with tempfile.TemporaryDirectory() as folder:
             runtime = ClientRuntime(Path(folder))

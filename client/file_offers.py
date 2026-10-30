@@ -10,6 +10,7 @@ from client.files import FileReceiver
 from client.file_cancel import cancelled_transfer_id
 from common.config import MAX_PAYLOAD_BYTES
 from common.models import MessageType, Packet
+from common.errors import FILE_FAILURE_REASONS
 
 
 MAX_FILE_OFFERS_PER_SESSION = 4096
@@ -287,6 +288,9 @@ class FileOfferReceiver:
             # CANCEL đi control có thể vượt META đi stream file.
             self.seen_ids.add(transfer_id)
         target = replace(packet, stream_id=transfer_id)
+        reason = json.loads(packet.payload)['reason']
+        if reason in FILE_FAILURE_REASONS:
+            return self._fail(target, 'RELAY_FAILED', reason)
         return self._fail(target, "FILE_CANCELLED", "File transfer was cancelled")
 
     def expire(self) -> list[str]:

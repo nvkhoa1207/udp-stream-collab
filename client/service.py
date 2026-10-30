@@ -51,6 +51,7 @@ class ClientService:
         self._file_sender = None
         self._sent_file_count = 0
         self._bootstrap_packets = deque()
+        self._file_messages = {}
         if hasattr(type(transport), 'notify_delivery'):
             transport.identity = username
             transport.delivery_ready = self._can_receive
@@ -68,6 +69,11 @@ class ClientService:
         method = getattr(type(self.transport), 'finish_stream', None)
         if method is not None:
             method(self.transport, self.server_peer, transfer_id, success=success)
+
+    def _remember_file_message(self, packet, transfer_id, direction):
+        self._file_messages[packet.message_id] = (transfer_id, direction)
+        while len(self._file_messages) > 65540:
+            del self._file_messages[next(iter(self._file_messages))]
 
     async def login(self, password: str) -> None:
         if self.tcp_peer is None or self._login_attempted or self._receive_started:
@@ -181,7 +187,7 @@ class ClientService:
         if self._sent_file_count >= 4096:
             raise RuntimeError("Send quota reached; reconnect to continue")
         sender = FileSender(self.transport, self.server_peer, self.username, recipient,
-                            self._file_io, self.file_updates)
+                            self._file_io, self.file_updates, self._remember_file_message)
         self.file_updates.begin(sender.transfer_id, recipient)
         self.file_updates.update(sender.transfer_id, name=Path(path).name)
         self._file_sender = sender
@@ -241,6 +247,7 @@ class ClientService:
                 request.result.set_result(False)
             return
         delivery = "failed"
+        self._remember_file_message(reply, request.transfer_id, 'receive')
         try:
             await asyncio.wait_for(self.transport.send(self.server_peer, reply),
                                    timeout=LOCAL_CANCEL_TIMEOUT_SECONDS)
@@ -286,6 +293,8 @@ class ClientService:
                     reply = await self._file_io(self.file_offers.handle, packet)
                     await self._send_file_notifications()
                     if reply is not None:
+                        if reply.stream_id != 'control':
+                            self._remember_file_message(reply, reply.stream_id, 'receive')
                         delivered = False
                         try:
                             await asyncio.wait_for(
@@ -349,13 +358,22 @@ class ClientService:
 
             elif packet.kind in (MessageType.FILE_ACCEPT, MessageType.FILE_COMPLETE, MessageType.ERROR):
                 if self._file_sender is not None:
-                    self._file_sender.handle(packet)
+                    handled = self._file_sender.handle(packet)
+                    if packet.kind == MessageType.ERROR and handled:
+                        continue  # FileSender đã gắn lỗi vào đúng lượt, không thêm banner.
                 if packet.kind == MessageType.ERROR:
                     try:
                         import json
-                        message = json.loads(packet.payload)['message']
+                        body = json.loads(packet.payload)
+                        message = body['message']
                         if type(message) is str:
-                            self.events.put_nowait({'type': 'error', 'message': message[:480]})
+                            reference = self._file_messages.get(body.get('related_message_id'))
+                            if reference is not None:
+                                self.events.put_nowait(dict(type='file_error', transfer_id=reference[0],
+                                    direction=reference[1], message=message[:480], code=body.get('code')))
+                            else:
+                                self.events.put_nowait({'type': 'error', 'message': message[:480],
+                                    'related_message_id': body.get('related_message_id')})
                     except (ValueError, KeyError, TypeError, UnicodeError, asyncio.QueueFull):
                         pass
 

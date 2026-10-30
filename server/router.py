@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass, field, replace
 
 from common.models import MessageType, Packet
+from common.errors import StreamClosedError
 
 
 @dataclass
@@ -17,6 +18,7 @@ class Transfer:
     updated: float
     message_ids: set = field(default_factory=set)
     failed: bool = False
+    finished: bool = False
 
 
 class Router:
@@ -68,7 +70,7 @@ class Router:
                 return False
             queue = self._queues[key] = asyncio.Queue(maxsize=16)
         try:
-            queue.put_nowait((target, packet, origin))
+            queue.put_nowait((target, packet, origin, self.transfers.get(packet.stream_id)))
         except asyncio.QueueFull:
             return False
         if key not in self._workers:
@@ -96,7 +98,9 @@ class Router:
             self._workers.pop(key, None)
             self.transport.notify_delivery()
 
-    async def _forward(self, target, packet, origin):
+    async def _forward(self, target, packet, origin, transfer=None):
+        if transfer is not None and transfer.finished:
+            return  # Gói còn trong hàng đợi của lượt đã đóng không cần gửi nữa.
         try:
             current = self.sessions.get(target.session_id)
             if current.peer != target.peer:
@@ -110,7 +114,11 @@ class Router:
                 transfer_id = self._references.get(json.loads(packet.payload).get('related_message_id'))
                 if transfer_id:
                     self._finish(transfer_id, success=False)
-        except (OSError, ValueError, TimeoutError):
+        except (OSError, ValueError, TimeoutError) as error:
+            if isinstance(error, StreamClosedError) and transfer is not None and transfer.finished:
+                return  # Đóng lượt chủ động đã đánh thức pending send, không phải lỗi mạng.
+            if transfer is not None and transfer.failed:
+                return  # Lỗi gốc của lượt này đã được báo trước khi dọn các gói còn lại.
             self.failures += 1
             if origin is not None:
                 self._error(origin, packet, 'RELAY_FAILED', 'Destination unavailable or relay timed out')
@@ -125,6 +133,7 @@ class Router:
     def _finish(self, transfer_id, *, success):
         transfer = self.transfers.pop(transfer_id, None)
         if transfer is not None:
+            transfer.finished = True
             for mid in transfer.message_ids:
                 self._references.pop(mid, None)
             for session in (transfer.sender, transfer.receiver):
@@ -133,6 +142,7 @@ class Router:
     def _abort_transfer(self, transfer_id, reason):
         transfer = self.transfers.get(transfer_id)
         if transfer is not None:
+            transfer.failed = True
             for target, other in ((transfer.sender, transfer.receiver),
                                   (transfer.receiver, transfer.sender)):
                 try:

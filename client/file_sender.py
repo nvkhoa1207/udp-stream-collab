@@ -12,6 +12,7 @@ from client.files import iter_chunks
 from client.file_cancel import FileTransferCancelled, cancelled_transfer_id
 from common.config import MAX_PAYLOAD_BYTES
 from common.models import MessageType, Packet
+from common.errors import FILE_FAILURE_REASONS
 
 
 FILE_SEND_CONCURRENCY = 8
@@ -44,13 +45,14 @@ def prepare_metadata(path: Path) -> dict:
 
 
 class FileSender:
-    def __init__(self, transport, server_peer, username, recipient, file_io, updates):
+    def __init__(self, transport, server_peer, username, recipient, file_io, updates, remember=None):
         self.transport = transport
         self.server_peer = server_peer
         self.username = username
         self.recipient = recipient
         self.file_io = file_io
         self.updates = updates
+        self.remember = remember
         self.transfer_id = uuid4().hex
         self.phase = "preparing"
         self.metadata = None
@@ -75,7 +77,11 @@ class FileSender:
             if (packet.sender == self.recipient
                     and cancelled_transfer_id(packet) == self.transfer_id):
                 self.remote_cancel = True
-                self.fail(FileTransferCancelled("The receiver cancelled the transfer"))
+                reason = json.loads(packet.payload)['reason']
+                if reason in FILE_FAILURE_REASONS:
+                    self.fail(RuntimeError(reason))
+                else:
+                    self.fail(FileTransferCancelled("The receiver cancelled the transfer"))
                 return True
             return False
         if packet.kind == MessageType.ERROR:
@@ -89,8 +95,12 @@ class FileSender:
                     return
             except ValueError:
                 return
-            self.fail(RuntimeError(f"{body['code']}: {body['message']}"))
-            return
+            if body['code'] == 'FILE_CANCELLED':
+                self.remote_cancel = True
+                self.fail(FileTransferCancelled(body['message']))
+            else:
+                self.fail(RuntimeError(f"{body['code']}: {body['message']}"))
+            return True
 
         if packet.sender != self.recipient or packet.stream_id != self.transfer_id:
             return
@@ -130,6 +140,8 @@ class FileSender:
                         stream_id=self.transfer_id, payload=payload, chunk_index=index)
         # Ghi nhận trước khi gửi vì bên nhận có thể trả lời ngay.
         self.message_ids.add(packet.message_id)
+        if self.remember is not None:
+            self.remember(packet, self.transfer_id, 'send')
         if kind == MessageType.FILE_META:
             self.meta_started = True
         await asyncio.wait_for(self.transport.send(self.server_peer, packet),

@@ -24,6 +24,17 @@ async def run(seconds, slow_file_seconds=0, control_dir=None):
         await asyncio.to_thread(auth.add_user, username, 'test-password')
     app = ServerApp(tcp_port=19000, udp_port=19001, auth=auth, enable_udp=True)
     await app.start()
+    def control_relay(server):
+        if not control_dir:
+            return
+        from common.models import MessageType
+        write = server.transport._write
+        def write_packet(peer, packet):
+            if packet.kind == MessageType.FILE_CHUNK and (control_dir / 'hold-relay').exists():
+                return  # Giữ chunk đang chờ ACK để thử Cancel khi relay còn bận.
+            write(peer, packet)
+        server.transport._write = write_packet
+    control_relay(app)
     with tempfile.TemporaryDirectory(prefix='btl-browser-') as folder:
         loop = asyncio.get_running_loop()
         runtimes = [ClientRuntime(Path(folder) / name) for name in ('hai', 'khoa')]
@@ -69,6 +80,7 @@ async def run(seconds, slow_file_seconds=0, control_dir=None):
                     elif not (control_dir / 'stop-server').exists() and not running:
                         app = ServerApp(tcp_port=19000, udp_port=19001, auth=auth, enable_udp=True)
                         await app.start()
+                        control_relay(app)
                         running = True
                         print('Server restarted.', flush=True)
                 await asyncio.sleep(0.1)
