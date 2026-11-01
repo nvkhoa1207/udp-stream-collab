@@ -205,6 +205,7 @@ class TeamE2ETests(unittest.IsolatedAsyncioTestCase):
     async def test_wrong_udp_sender_session_endpoint_and_malformed_datagram(self):
         from dataclasses import replace
         from common.codec import encode_packet
+        from security.wire import seal_record
         from common.models import MessageType as M, Packet
         a, b = await self.client('hai'), await self.client('khoa')
         forged = Packet(kind=M.MSG, sender='third', recipient='khoa',
@@ -212,7 +213,7 @@ class TeamE2ETests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(TimeoutError):
             await asyncio.wait_for(a.transport.send(a.server_peer, forged), 0.1)
         packet = replace(forged, sender='hai', seq=1, session_id=a.session_id)
-        b.transport._socket.sendto(encode_packet(packet), self.app.transport.local_address)
+        b.transport._socket.sendto(seal_record(encode_packet(packet), b'UDP'), self.app.transport.local_address)
         a.transport._write(a.server_peer, replace(packet, session_id='b'*32))
         a.transport._socket.sendto(b'not-json', self.app.transport.local_address)
         a.transport._socket.sendto(b'x' * 1300, self.app.transport.local_address)

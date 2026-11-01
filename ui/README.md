@@ -1,5 +1,9 @@
 # UI và HTTP bridge — Khoa
 
+**Cập nhật mã hóa 01/11/2026:** cài `requirements.txt` và chuẩn bị cùng file
+`shared.key` cho server/client trước các lệnh bên dưới. Xem
+[hướng dẫn mã hóa](../docs/08_ENCRYPTION.md).
+
 ## Cập nhật giao diện 29/10/2026
 
 Nhãn, thông báo và lỗi của ứng dụng dùng tiếng Anh. Comment trong code dùng

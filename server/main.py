@@ -8,6 +8,7 @@ import logging
 from common.config import TCP_PORT, UDP_PORT, configure_console
 from server.app import ServerApp
 from server.auth import AuthService
+from security.wire import get_cipher
 
 
 def main() -> None:
@@ -39,6 +40,7 @@ def main() -> None:
     )
 
     try:
+        get_cipher()  # Kiểm tra khóa trước khi mở server.
         auth = AuthService()
 
         for username in ("hai", "khoa"):

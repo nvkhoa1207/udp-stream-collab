@@ -70,6 +70,7 @@ async def main():
         )
         assert event == {
             "type": "message",
+            "message_id": packet.message_id,
             "sender": "khoa",
             "recipient": "friend",
             "text": "Hello, I am Khoa.",

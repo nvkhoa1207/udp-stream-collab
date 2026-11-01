@@ -1,5 +1,9 @@
 # Chạy Windows, LAN và Docker/netem
 
+**Cập nhật mã hóa 01/11/2026:** cài `requirements.txt` và chuẩn bị cùng file
+`shared.key` cho server/client trước các lệnh bên dưới. Xem
+[hướng dẫn mã hóa](08_ENCRYPTION.md).
+
 Cập nhật 29/10/2026. Windows loopback đã chạy; LAN hai máy và Docker Engine
 chưa chạy trong phiên tích hợp này. Không dùng kết quả fault injection Python
 để khẳng định đã chạy netem.
@@ -83,7 +87,10 @@ Mở HTTP 18000/18001, nhập TCP 19000. Có `--slow-file-seconds 15` để gi�
 đoạn send chunk đủ lâu khi thử nút Hủy; delay này chỉ ở fixture. Fixture tự dọn
 sau deadline, không thay cấu hình ứng dụng chính.
 
-## Docker và netem — chuẩn bị, chưa chạy
+## Docker và netem — hướng dẫn và ghi nhận cũ 29/10
+
+**Kết quả mới 01/11:** build, đọc khóa mount và netem đã PASS; xem
+[08_ENCRYPTION.md](08_ENCRYPTION.md). Đoạn dưới ghi lại trạng thái cũ 29/10.
 
 Đã chạy `docker compose --profile test config --quiet`: PASS. `docker info`
 thất bại vì pipe dockerDesktopLinuxEngine không tồn tại; Engine chưa hoạt động.

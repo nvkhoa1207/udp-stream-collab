@@ -11,6 +11,7 @@ from common.config import (
     MAX_TCP_RECORD_BYTES,
 )
 from common.models import MessageType, Packet
+from security.wire import OVERHEAD, open_record, seal_record
 
 
 def _require_int(value: object, name: str, minimum: int = 0) -> None:
@@ -278,9 +279,10 @@ def encode_tcp_record(record: dict) -> bytes:
         allow_nan=False,
     ).encode("utf-8")
 
-    if len(body) > MAX_TCP_RECORD_BYTES:
+    if len(body) > MAX_TCP_RECORD_BYTES - OVERHEAD:
         raise ValueError("TCP record exceeds the size limit")
 
+    body = seal_record(body, b'TCP')
     prefix = len(body).to_bytes(4, byteorder="big")
 
     return prefix + body
@@ -298,6 +300,7 @@ async def read_tcp_record(
             raise ValueError("Invalid TCP record length")
 
         body = await reader.readexactly(body_size)
+        body = open_record(body, b'TCP')
 
         try:
             record = json.loads(

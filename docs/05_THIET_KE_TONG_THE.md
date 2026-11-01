@@ -43,7 +43,7 @@ WebSocket. UI HTML/CSS/JavaScript thuần, `fetch()` polling, chưa cần long-p
 | transport | UDP, ACK/retry/order, recv_limit, CUBIC giản lược | Hải |
 | client | Login, chat, event dispatch, chia/ghép và điều phối file | Khoa |
 | ui | HTTP bridge localhost, form/chat/file/progress | Khoa |
-| security/cipher.py | Stub AES-GCM tùy chọn, ngoài đường chạy bản đầu | Phối hợp nếu bổ sung sau |
+| security/cipher.py, security/wire.py | AES-GCM và envelope TCP/UDP với khóa chia sẻ trước | Cả hai |
 | mocks/scripts | Phát triển và kiểm tra local, không thay kiểm thử mạng | Cả hai |
 
 Giữ cấu trúc hiện tại. Chưa bắt buộc tạo FileManager, TransferRegistry,
@@ -125,15 +125,12 @@ Xem [UI](../ui/README.md) để ghép endpoint; HTTP/UI đã nối core thật v
 
 ## 6. Bảo mật đúng phạm vi
 
-Bản đầu chưa TLS/HMAC/AES và không cấp khóa hai hướng. `PayloadCipher` là stub
-ngoài đường chạy; không thay stub bằng pass-through hoặc tạo khóa giả. Kiểm tra
-mật khẩu băm có salt, session/endpoint/quyền gửi, schema/size/quota, đường dẫn
-file và API localhost vẫn phải làm. Password AUTH trên TCP chưa được che nội
-dung; session ID/endpoint/SHA-256 không chống nghe lén hay giả mạo chủ động.
-
-Nếu bổ sung mật mã sau này phải cập nhật hợp đồng và kiểm thử cả hai đầu, bảo
-vệ việc trao đổi khóa và quản lý nonce đúng. Không coi mở rộng này là việc K5
-bắt buộc chỉ vì từng nằm trong bản thiết kế trước.
+Từ 01/11/2026, `PayloadCipher` gọi AES-GCM của cryptography, `security/wire.py`
+bọc TCP/UDP. Khóa 32 byte chia sẻ trước ngoài ứng dụng, nonce ngẫu nhiên 12 byte
+mỗi lần gửi, tag 16 byte và AAD khác nhau cho TCP/UDP. Mã hóa trước socket write,
+giải mã/xác thực trước codec và xử lý phiên. Không hạ cấp sang plaintext.
+Các kiểm tra session, endpoint, hash file và quota vẫn giữ nguyên.
+Giới hạn và cách chạy: [08_ENCRYPTION.md](08_ENCRYPTION.md).
 
 ## 7. Mốc ghép và bằng chứng
 

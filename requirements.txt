@@ -1,2 +1,2 @@
-# Bản đầu và các demo hiện tại chỉ dùng thư viện chuẩn Python.
-# Nếu triển khai AES-GCM tùy chọn, bổ sung cryptography cùng phiên bản đã kiểm thử.
+# AES-GCM cho bản tin TCP và UDP.
+cryptography==46.0.7

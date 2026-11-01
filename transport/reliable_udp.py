@@ -1,4 +1,4 @@
-"""Gửi UDP có ACK, gửi lại và giới hạn bộ đệm; chưa mã hóa dữ liệu."""
+"""Gửi UDP có ACK, gửi lại và giới hạn bộ đệm; envelope AES-GCM."""
 import asyncio
 from common.errors import StreamClosedError
 import re
@@ -10,6 +10,7 @@ from common.config import MAX_DATAGRAM_BYTES
 from common.config import RECEIVE_WINDOW_PACKETS, MAX_RECEIVE_STREAMS
 from common.models import MessageType, Packet, ReceivedPacket
 from transport.congestion import CongestionController
+from security.wire import OVERHEAD, open_record, seal_record
 
 
 @dataclass
@@ -37,7 +38,7 @@ class _Protocol(asyncio.DatagramProtocol):
         try:
             if len(data) > MAX_DATAGRAM_BYTES:
                 return
-            self.owner._received(addr[:2], decode_packet(data))
+            self.owner._received(addr[:2], decode_packet(open_record(data, b'UDP')))
         except (ValueError, KeyError, asyncio.QueueFull):
             self.owner.rejected += 1
 
@@ -187,7 +188,10 @@ class ReliableUdpTransport:
     def _write(self, peer, packet):
         if self._socket is None or self._closed:
             raise ConnectionError('Transport closed')
-        self._socket.sendto(encode_packet(packet), peer)
+        data = seal_record(encode_packet(packet), b'UDP')
+        if len(data) > MAX_DATAGRAM_BYTES:
+            raise ValueError('Encrypted datagram exceeds size limit')
+        self._socket.sendto(data, peer)
 
     def _received(self, peer, packet):
         if self._closed:
@@ -349,7 +353,7 @@ class ReliableUdpTransport:
         self._pending[pending_key] = future
         congestion = self._congestion[peer]
         wake = self._congestion_changed[peer]
-        size = len(encode_packet(packet))
+        size = len(encode_packet(packet)) + OVERHEAD
         reserved = False
         try:
             loop = asyncio.get_running_loop()

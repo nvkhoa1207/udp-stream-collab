@@ -212,8 +212,8 @@ một process, không encode, auth, ACK, loss, window hay CUBIC. Khi transport t
 có lifecycle và phiên đúng, truyền vào ClientService để kiểm thử lại toàn luồng.
 
 Hải phụ trách server/transport/common; Khoa phụ trách client/file/UI và phối hợp
-an toàn đầu vào. Đổi API thì cập nhật caller/model/docs cùng thay đổi; không tự
-thêm mã hóa, MSG_DELIVERED hay module mới để đáp ứng một bản đề xuất cũ.
+an toàn đầu vào. Từ 01/11/2026, mã hóa được đặt ở lớp wire, không đổi Packet
+hoặc hợp đồng Transport; xem [08_ENCRYPTION.md](08_ENCRYPTION.md).
 
 ## Nhận META/CHUNK/END ở client
 

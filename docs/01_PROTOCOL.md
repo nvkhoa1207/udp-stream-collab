@@ -14,13 +14,13 @@ Bằng chứng và giới hạn ở 04_ACCEPTANCE.md; các nhật ký cũ không
 - HTTP bridge chỉ bind `127.0.0.1`, phục vụ HTML/CSS/JS và API cùng origin;
   JavaScript polling bằng `fetch()`. Python dùng thư viện, không dùng framework;
   không Flask, Django, FastAPI hoặc WebSocket.
-- Bản đầu chưa mã hóa payload, chưa có TLS/HMAC/AES hoặc cấp khóa. Các cơ chế này
-  là mở rộng tùy chọn; giới hạn bảo mật được ghi ở mục 8.
+- Từ 01/11/2026, TCP/UDP được bọc AES-256-GCM với khóa chia sẻ trước.
+  Không có chế độ fallback plaintext; xem [mã hóa](08_ENCRYPTION.md).
 
 ## 2. Handshake, đăng nhập và BIND
 
-Mỗi record TCP là prefix độ dài 4 byte big-endian + JSON UTF-8, body tối đa
-64 KiB. Đọc đủ prefix/body, xử lý EOF và timeout; không coi một `recv()` là đủ.
+Mỗi record TCP là prefix độ dài 4 byte big-endian + envelope AES-GCM chứa
+JSON UTF-8. Độ dài là số byte envelope, tối đa 64 KiB (JSON tối đa 65504 byte). Đọc đủ prefix/body, xử lý EOF và timeout; không coi một `recv()` là đủ.
 
 | Record | Trường ngoài `type` |
 |---|---|
@@ -51,8 +51,8 @@ Nhờ vậy không phải đăng ký khóa giả hoặc đợi flow control trư
 
 ## 3. Packet UDP và giới hạn
 
-Nguồn model: [common/models.py](../common/models.py). Wire là JSON UTF-8 với
-payload base64. `Packet` bất biến; transport dùng bản sao khi gán session/seq.
+Nguồn model: [common/models.py](../common/models.py). JSON bên trong envelope là UTF-8 với
+payload base64; toàn bộ JSON được mã hóa trước khi gửi UDP. `Packet` bất biến; transport dùng bản sao khi gán session/seq.
 
 | Field | Quy ước |
 |---|---|
@@ -73,8 +73,8 @@ slot còn trống tại một thời điểm. `None` nghĩa là không quảng b
 chưa cấp quyền gửi. Codec phải loại bool, số âm và sai tổ hợp field/kind.
 
 Datagram tối đa 1200 byte; body JSON tối đa 1100 byte (`MAX_PLAINTEXT_BYTES`, giữ
-tên cũ để tương thích); payload thô tối đa 480 byte. Bản đầu không có envelope/tag
-mật mã. Kiểm tra byte encode thực tế của cả packet, kể cả `recv_limit`; payload
+tên cũ để tương thích); payload thô tối đa 480 byte. Envelope gồm magic 4 byte, nonce 12 byte và tag 16 byte,
+tổng thêm 32 byte (tối đa 1132 byte sau mã hóa). Kiểm tra byte encode thực tế của cả packet, kể cả `recv_limit`; payload
 480 byte không tự bảo đảm mọi header đều vừa gói. Không cắt dữ liệu âm thầm.
 
 USER_LIST do server tạo (`sender="server"`), dùng
@@ -272,11 +272,13 @@ stream mà Hải phải nối vào transport.
 
 ## 8. Bảo mật và CUBIC trong phạm vi hiện tại
 
-Không bắt buộc TLS/HMAC/AES hoặc tx_key/rx_key trong bản đầu. Vẫn cần băm mật khẩu
-có salt, session khó đoán, kiểm tra endpoint/quyền gửi/đầu vào, quota, tên file an
-toàn, HTTP localhost và không log bí mật. Băm mật khẩu lưu trữ không che password
-trong AUTH qua TCP. Session/endpoint và SHA-256 không bảo vệ trước nghe lén hoặc
-giả mạo chủ động; không tuyên bố packet đã được xác thực bằng mật mã.
+Từ 01/11/2026 dùng AES-256-GCM cho cả AUTH TCP và mọi packet UDP.
+Khóa chung được phân phối ngoài ứng dụng, không cấp tx_key/rx_key qua AUTH_OK.
+AAD phân biệt TCP/UDP; nonce mới mỗi lần mã hóa, kể cả gửi lại. Không nhận
+plaintext hoặc ciphertext sai tag. CUBIC tính cả 32 byte overhead mã hóa.
+Vẫn giữ băm mật khẩu, session/endpoint, quota và kiểm tra đầu vào. Khóa chung
+không cách ly các thành viên biết khóa, không phải E2EE/forward secrecy; chưa có
+lớp chống replay mật mã riêng. Xem [08_ENCRYPTION.md](08_ENCRYPTION.md).
 
 Chọn **CUBIC giản lược**, không còn chờ chọn BBR hay CUBIC. Controller dùng chung
 cho các stream trên một peer/hướng, trả ngân sách byte; flow control ở mục 6 tính

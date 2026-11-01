@@ -4,6 +4,15 @@ services:
     image: btl-udp-collab:local
     stdin_open: true
     tty: true
+    environment:
+      BTL_KEY_FILE: /run/secrets/shared.key
+    volumes:
+      - type: bind
+        source: ./shared.key
+        target: /run/secrets/shared.key
+        read_only: true
+        bind:
+          create_host_path: false
     ports:
       - "127.0.0.1:9000:9000/tcp"
       - "127.0.0.1:9001:9001/udp"

@@ -56,9 +56,10 @@ class AuthTests(unittest.IsolatedAsyncioTestCase):
             await bind_session(transport, peer, 'khoa', 'a' * 32)
 
     async def test_fragmented_and_truncated_records(self):
-        body = json.dumps({'type': 'HELLO_ACK'}).encode()
+        from common.codec import encode_tcp_record
+        data = encode_tcp_record({'type': 'HELLO_ACK'})
         reader = asyncio.StreamReader()
-        for byte in len(body).to_bytes(4, 'big') + body:
+        for byte in data:
             reader.feed_data(bytes([byte]))
         self.assertEqual(await read_record(reader), {'type': 'HELLO_ACK'})
         reader = asyncio.StreamReader()

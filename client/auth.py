@@ -1,10 +1,8 @@
 """Đăng nhập qua TCP rồi gửi BIND bằng kết nối UDP có sẵn."""
 import asyncio
-import json
 import re
-from common.config import MAX_TCP_RECORD_BYTES
 from common.models import MessageType, Packet
-from common.codec import read_tcp_record
+from common.codec import encode_tcp_record, read_tcp_record
 
 
 async def read_record(reader):
@@ -12,10 +10,7 @@ async def read_record(reader):
 
 
 async def write_record(writer, value):
-    body = json.dumps(value).encode('utf-8')
-    if len(body) > MAX_TCP_RECORD_BYTES:
-        raise ValueError('TCP record is too large')
-    writer.write(len(body).to_bytes(4, 'big') + body)
+    writer.write(encode_tcp_record(value))
     await writer.drain()
 
 

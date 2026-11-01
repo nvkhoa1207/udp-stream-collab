@@ -1,5 +1,9 @@
 # Nghiệm thu — ghi kết quả thật
 
+**Cập nhật 01/11/2026:** AES-GCM TCP/UDP đã chạy 230 test, 20 client/file
+tới 16 MiB và Docker/netem. Kết quả mới ở [08_ENCRYPTION.md](08_ENCRYPTION.md).
+Các bảng ghi ngày 29/10 bên dưới là bằng chứng lịch sử trước mã hóa.
+
 Cập nhật 29/10/2026: test server/client nhóm qua TCP/UDP thật và HTTP/browser
 trên Windows loopback. 202/202 unittest PASS khi bật BTL_NETWORK_TEST=1;
 11 lượt demo mock/local PASS riêng. LAN hai máy, Docker Engine/netem và T16

@@ -11,6 +11,7 @@ from common.codec import (
 )
 from common.config import MAX_PLAINTEXT_BYTES, MAX_TCP_RECORD_BYTES
 from common.models import MessageType, Packet
+from security.wire import seal_record
 
 
 class PacketCodecTests(unittest.TestCase):
@@ -217,6 +218,7 @@ class TcpRecordTests(unittest.IsolatedAsyncioTestCase):
     async def test_rejects_invalid_json_body(self):
         for body in (b"\xff", b"[]", b'{"x":1,"x":2}'):
             with self.subTest(body=body):
+                body = seal_record(body, b'TCP')
                 reader = asyncio.StreamReader()
                 reader.feed_data(
                     len(body).to_bytes(4, byteorder="big") + body

@@ -6,7 +6,10 @@ truyền file tin cậy qua UDP trong mạng LAN.
 
 **Thành viên:** Nguyễn Việt Khoa và Hải.
 
-**Cập nhật:** 29/10/2026 — nhánh tích hợp `hai/server-transport`.
+**Cập nhật:** 01/11/2026 — bổ sung AES-256-GCM trên `main`.
+
+**Bắt buộc trước khi chạy:** cài `requirements.txt`, tạo một `shared.key` và dùng
+cùng file khóa ở server/các client. Xem [hướng dẫn mã hóa](docs/08_ENCRYPTION.md).
 
 **Định hướng:** làm đơn giản, bám đề và phản hồi giảng viên; ưu tiên chạy đúng,
 kiểm thử được và giải thích được code.
@@ -19,7 +22,8 @@ thuật toán truyền UDP giữ nguyên.
 > **Đã ghép ứng dụng mạng thật.** TCP login, UDP chat/file, Selective Repeat,
 > flow control, CUBIC rút gọn và HTTP/UI đã chạy trên Windows loopback.
 > 20 client, file tới 16 MiB, 140 file nối tiếp và fault injection đã có kết quả.
-> LAN hai máy và Docker/netem chưa chạy; xem mục 9 và báo cáo Hải.
+> LAN hai máy chưa được xác minh trong lượt này. Mã hóa và Docker/netem đã
+> có kết quả mới ngày 01/11 tại [08_ENCRYPTION.md](docs/08_ENCRYPTION.md).
 
 ## 1. Yêu cầu BTL và phạm vi thực hiện
 
@@ -42,7 +46,7 @@ trong README ngày 21/10/2026.
 | HTTP/JavaScript UI | Bước 9 | HTML, CSS, JavaScript thuần và HTTP bridge cục bộ |
 | Kiểm thử, chất lượng code, báo cáo | Bước 10; mục 10 | Kết quả thật, README chạy đúng và báo cáo PDF |
 
-### Phản hồi giảng viên đã ghi nhận
+### Phản hồi giảng viên đã ghi nhận (lịch sử trước khi bổ sung mã hóa)
 
 - **Dùng cả TCP và UDP.** Nhóm chọn TCP cho handshake/đăng nhập, UDP cho chat/file.
 - **Python được dùng thư viện nhưng không dùng framework.** Ưu tiên socket và
@@ -245,7 +249,7 @@ chưa được tối ưu qua đo và không phải ngưỡng bắt buộc của 
 |---|---|
 | TCP / UDP server | 9000 / 9001 |
 | Datagram tối đa | 1200 byte |
-| Body JSON (bản đầu không có envelope mã hóa) | 1100 byte |
+| Body JSON trước mã hóa | 1100 byte |
 | Payload/chunk tối đa | 480 byte |
 | Record TCP tối đa | 64 KiB |
 | Heartbeat / offline timeout | 3 giây / 10 giây |
@@ -255,16 +259,19 @@ chưa được tối ưu qua đo và không phải ngưỡng bắt buộc của 
 | Nhịp probe / timeout không tăng credit | 1 giây / 10 giây |
 | Tổng stream có buffer mỗi transport | 128 |
 
-Bản đầu không có envelope mã hóa; codec phải đo byte sau serialize thực tế.
+Envelope AES-GCM thêm 32 byte; JSON tối đa 1100 nên datagram tối đa 1132 byte,
+nhỏ hơn giới hạn 1200. Codec vẫn đo byte sau serialize thực tế.
 Payload nhỏ không tự bảo đảm cả datagram vừa giới hạn. Metadata, user list và lỗi cũng phải vừa
 gói; danh sách online cần chia trang khi vượt giới hạn.
 
 ## 6. Bảo mật trong phạm vi đơn giản
 
-Mã hóa payload được để ngoài phạm vi đầu theo phản hồi đã ghi nhận. Các phương
-án TLS/HMAC/AES-GCM trong tài liệu đề xuất trước đây **không tự trở thành yêu cầu
-bắt buộc** của bản đơn giản này. Nếu chọn thêm thì phải triển khai, kiểm thử và
-mô tả đúng phạm vi bảo vệ.
+Từ 01/11/2026, bản tin TCP và toàn bộ packet UDP được mã hóa AES-256-GCM
+bằng `cryptography`, đáp ứng phần mã hóa payload của bước 8 trong đề gốc.
+Khóa 32 byte được tạo ngẫu nhiên và chia sẻ trước ngoài ứng dụng; không gửi khóa
+qua TCP rõ, không hard-code, không commit. Mỗi lần mã hóa tạo nonce ngẫu nhiên
+12 byte mới; tag sai, khóa sai và bản tin rõ đều bị từ chối trước xử lý nghiệp vụ.
+Chi tiết wire format, cách chạy và giới hạn: [Mã hóa](docs/08_ENCRYPTION.md).
 
 Các biện pháp đã triển khai trong phạm vi bản đầu:
 
@@ -277,10 +284,11 @@ Các biện pháp đã triển khai trong phạm vi bản đầu:
 - HTTP bridge chỉ nghe localhost, kiểm tra truy cập API cục bộ và giới hạn upload.
 - Lỗi ghi, hash sai hoặc timeout phải có thông báo và giải phóng tài nguyên.
 
-Session ID, kiểm tra endpoint và SHA-256 **không thay thế mã hóa/xác thực mật mã**.
-Nếu chưa bảo vệ kênh đăng nhập hoặc xác thực packet bằng mật mã thì ghi rõ giới
-hạn; không tuyên bố chống nghe lén hay giả mạo chủ động. Phần bảo mật hiện chưa
-được nghiệm thu.
+AES-GCM bảo vệ nội dung TCP/UDP trước người không có khóa. Đây là khóa chung
+của nhóm tin cậy, không phải E2EE: server và người có khóa đều có khả năng giải mã.
+Chưa có TLS, trao đổi khóa tự động, forward secrecy hoặc chống replay mật mã
+riêng. Session/sequence/dedup vẫn xử lý gói cũ theo giao thức. HTTP chỉ trên
+localhost và file lưu trên đĩa không được mã hóa bởi lớp này.
 
 ## 7. Trạng thái bản tích hợp
 
@@ -292,16 +300,24 @@ hạn; không tuyên bố chống nghe lén hay giả mạo chủ động. Phầ
 - CUBIC rút gọn dùng byte budget chung mỗi peer, pacing và recovery flight.
 - Server relay chat/file, USER_LIST phân trang/revision, heartbeat/offline/logout.
 - Client tự nhận file, kiểm tra size/hash, progress, hủy hai chiều; HTTP polling/UI thật.
-- Không còn stub trên đường chạy bắt buộc. `security/cipher.py` là mở rộng tùy chọn,
-  không được gọi. [Báo cáo Khoa](reports/KHOA_REPORT.md) được giữ nguyên như bàn giao;
+- Không còn stub trên đường chạy bắt buộc. `security/cipher.py` dùng thư viện AES-GCM,
+  được gọi qua `security/wire.py` để mã hóa TCP/UDP. [Báo cáo Khoa](reports/KHOA_REPORT.md) được giữ nguyên như bàn giao;
   [báo cáo Hải](reports/HAI_REPORT.md) ghi phần ghép và kết quả mạng mới.
 
 ## 8. Chạy trên Windows PowerShell
 
-Yêu cầu Python 3.11+ và thư viện chuẩn, không cần framework hoặc dependency bổ sung.
+Yêu cầu Python 3.11+ và `cryptography` trong requirements.txt, không dùng framework.
 Mở ba cửa sổ PowerShell trong thư mục repo. Dùng Python trong `.venv` trực tiếp,
 không cần đổi ExecutionPolicy. Nếu chưa có môi trường: `py -3 -m venv .venv`.
-Nhánh đã ghép là `hai/server-transport`, không mặc định `main` đã có code mới.
+Code tích hợp nằm trên `main`. Chuẩn bị một lần:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m security.cipher --generate-key shared.key
+```
+
+Nếu đã có khóa thì giữ lại, không tạo lại. Server và mọi client dùng cùng file
+`shared.key`; xem [hướng dẫn macOS và LAN](docs/08_ENCRYPTION.md).
 
 Cửa sổ 1 — server:
 
@@ -334,7 +350,8 @@ Nút `Cancel` có ở cả phía gửi và nhận khi lượt còn hủy đượ
 có nút `Download`. Ctrl+C đóng từng chương trình.
 
 macOS/Linux dùng `python3 -m venv .venv`, sau đó `.venv/bin/python -m ...` với
-cùng tham số. Bản này mới được đo trên Windows/Python 3.13; Docker/Linux chưa chạy.
+cùng tham số. Kết quả mã hóa mới được ghi riêng trong docs/08_ENCRYPTION.md; số đo cũ bên dưới
+là lịch sử trước mã hóa.
 
 ### Hai máy LAN — chưa nghiệm thu
 
@@ -347,6 +364,10 @@ bằng `Get-FileHash -Algorithm SHA256 <file>`, ghi log/kết quả vào nghiệ
 Chi tiết [Windows/LAN/Docker](docs/07_WINDOWS_LAN_DOCKER.md).
 
 ## 9. Kiểm thử và bằng chứng
+
+Kết quả mới 01/11/2026: 230 test đạt, 20 client/file tới 16 MiB và Docker/netem
+đạt khi bật mã hóa. Xem [chi tiết](docs/08_ENCRYPTION.md). Số đo ngày 29/10
+bên dưới là lịch sử trước mã hóa.
 
 ```powershell
 $env:BTL_NETWORK_TEST = '1'
@@ -420,7 +441,7 @@ trên host. Hướng dẫn đầy đủ và nguồn tham khảo ở docs/07_WIND
 [nghiệm thu](docs/04_ACCEPTANCE.md), [Git workflow](docs/03_GIT_WORKFLOW.md),
 [phần Hải](reports/HAI_REPORT.md), [phần Khoa](reports/KHOA_REPORT.md).
 
-Bản đầu chưa có TLS/HMAC/mã hóa payload theo phạm vi nhóm đã chốt. Session/IP/port
-và SHA-256 không thay xác thực mật mã. Không commit `.venv`, mật khẩu, file thử
+Bản hiện tại có AES-GCM cho TCP/UDP; xem giới hạn khóa chung ở mục 6.
+Không commit `shared.key`, `.venv`, mật khẩu, file thử
 hoặc output sinh ra. Báo cáo Hải là Markdown để ghép với phần Khoa; báo cáo PDF
 nhóm cuối cùng và ảnh/LAN từ máy còn lại cần ghép trước khi nộp.
