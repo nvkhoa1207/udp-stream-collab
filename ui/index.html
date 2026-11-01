@@ -76,7 +76,7 @@
       <section class="panel file-panel" aria-labelledby="file-heading">
         <h2 id="file-heading">File transfers</h2>
         <p id="file-recipient" class="recipient-hint">Choose one recipient to send a file.</p>
-        <p class="hint">Up to 16 MiB per file. Incoming files are saved automatically to your configured folder.</p>
+        <p class="hint">Up to 16 MiB per file. Incoming files are saved automatically to your configured folder. Only the sender can cancel a transfer.</p>
         <form id="upload">
           <div>
             <span class="field-label">File</span>
@@ -93,7 +93,7 @@
       </section>
     </div>
     <footer class="note">
-      A transfer is complete after its SHA-256 check succeeds. This version does not use TLS or payload encryption.
+      A transfer is complete after its SHA-256 check succeeds. Client-server traffic is encrypted with AES-GCM.
     </footer>
   </main>
 </body>

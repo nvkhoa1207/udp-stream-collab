@@ -50,7 +50,7 @@ client trước rồi server. Username cũ có thể bị giữ tối đa 10 gi�
    Private của Windows Firewall. Không cần tắt firewall; cấu hình này do người
    vận hành làm, phiên tích hợp không tự thay thiết lập hệ thống.
 4. Thử hai user online; chat chung và riêng; file rỗng/binary/tên tiếng Việt,
-   1 MiB rồi 10 MiB, hủy từ cả hai phía, tắt một client giữa file và login lại.
+   1 MiB rồi 10 MiB, hủy từ phía gửi và kiểm tra phía nhận dọn file tạm, tắt một client giữa file và login lại.
 5. So hash file gốc và file nhận bằng lệnh sau trên từng máy:
 
 ```powershell

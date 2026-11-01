@@ -14,7 +14,7 @@ tiếng Việt ngắn gọn. HTML/CSS được xuống dòng; JavaScript tách t
 - Chọn người nhận bằng danh sách nút hoặc ô Recipient, dùng chung cho chat/file.
 - Chat có nhãn Broadcast/Private và bộ đếm byte UTF-8. Enter vẫn xuống dòng;
   bấm Send message để gửi, giới hạn vẫn là 480 byte.
-- File có tên, dung lượng, phần trăm, trạng thái và nút Cancel. Tối đa 16 MiB,
+- File có tên, dung lượng, phần trăm, trạng thái; chỉ file gửi có nút Cancel. Tối đa 16 MiB,
   tự nhận như cũ; 100% số byte chưa đồng nghĩa với Completed.
 - Giữ nguyên endpoint, token, CSP, cách polling và dùng textContent để hiển thị.
   Event file gửi có thêm trường name để hiển thị tên từ metadata đã có;
@@ -29,6 +29,18 @@ Phần gửi UDP tách riêng bước đợi cửa sổ nhận và đợi CUBIC 
 hai chiều, Unicode, giới hạn 480 byte, truyền file 1200 byte và hủy ở cả hai
 phía. Bố cục 390 px không tràn ngang; nội dung chứa thẻ HTML vẫn hiện như chữ.
 
+## Phạm vi UI hiện tại (01/11/2026)
+
+- Nhớ Server/TCP port khi nhập hoặc đăng nhập; khôi phục sau F5 bằng localStorage.
+  Chỉ lưu `{host, port}`, không lưu password, username, token hay khóa mã hóa.
+  Dữ liệu sai định dạng hoặc storage bị chặn không làm lỗi form. Cổng HTTP khác
+  nhau là origin khác nhau nên mỗi client browser nhớ địa chỉ riêng.
+- Chỉ người gửi chủ động Cancel. Thẻ nhận không có nút Cancel; API HTTP từ chối
+  direction khác `send`. Phía nhận vẫn tự nhận file, xử lý FILE_CANCEL từ người
+  gửi, dọn `.part`, timeout và cleanup khi đóng phiên. Không xóa file hoàn tất.
+- Hàm hủy nhận nội bộ và các test/demo cũ được giữ để kiểm tra lifecycle;
+  không còn được gọi từ UI/HTTP. Kết quả hủy hai chiều dưới đây là lịch sử.
+
 ## Chạy ứng dụng
 
 Nếu phiên bị ngắt hoặc server mất kết nối, bấm Log in sau khi server hoạt động
@@ -42,7 +54,7 @@ python -m client.main --http-port 8000 --received-dir data/received
 ```
 
 Mở http://127.0.0.1:8000. Form đăng nhập, chat, upload nhị phân, polling và hủy
-hai chiều đã có. Thư mục nhận được in ở terminal. Nhập server TCP từ UI, không
+phía gửi đã có. Phía nhận vẫn xử lý FILE_CANCEL và dọn file tạm. Thư mục nhận được in ở terminal. Nhập server TCP từ UI, không
 truyền password qua CLI. Transport/server đã ghép thật; chạy server.main và hai client theo README.
 Sai mật khẩu trả 401, mất kết nối trả 503; không có fixture thay tính năng thật. Ctrl+C dọn job/phiên.
 
@@ -68,7 +80,7 @@ Sai mật khẩu trả 401, mất kết nối trả 503; không có fixture thay
 | `POST /api/messages` | Gửi `{recipient, text}` |
 | `GET /api/events?after=<id>` | Poll users/message/progress/status/error; cursor/ring 512 event đã có |
 | `POST /api/files?recipient=...&name=...` | Body nhị phân tối đa 16 MiB |
-| `POST /api/cancel` | `{direction,transfer_id}`, gửi hoặc nhận |
+| `POST /api/cancel` | `{direction:"send",transfer_id}`, chỉ người gửi |
 | `POST /api/logout` | Logout và dọn phiên |
 
 Không có endpoint để người dùng Accept/Reject file. Core kiểm tra metadata,
@@ -104,3 +116,14 @@ hai phía và hủy từ sender/receiver. Hủy dùng fixture chậm 15s trướ
 để thao tác nút; không thay ACK/socket thật. HTTP E2E còn kiểm tra upload/poll/logout
 với backend thật, không factory mock. Đã sửa đọc HTML UTF-8 trên Windows và bỏ
 ERROR đáp ERROR sau CANCEL. LAN hai máy/Docker vẫn chưa chạy.
+
+## Kiểm tra điều chỉnh UI 01/11/2026
+
+- `node --check ui/app.js`: PASS.
+- `node --test tests/ui_browser.test.cjs`: 3 test PASS. Chạy JavaScript thật với
+  DOM/storage tối thiểu: nhớ LAN/port qua tải lại, không lưu credential, dữ liệu
+  hỏng/storage bị chặn không làm lỗi form, chỉ thẻ gửi có Cancel.
+- `BTL_NETWORK_TEST=1 .venv/bin/python -m unittest discover -s tests -q`:
+  231 test PASS, gồm giới hạn API cancel phía gửi và cleanup khi nhận CANCEL.
+- Browser điều khiển trực tiếp không khả dụng trong lượt này; các test JavaScript
+  trên không phải bằng chứng thao tác F5 trong browser thật.

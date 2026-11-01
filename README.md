@@ -299,7 +299,7 @@ localhost và file lưu trên đĩa không được mã hóa bởi lớp này.
   probe/stall deadline, ACTIVE/DRAINING/CLOSED và tombstone đến hết phiên.
 - CUBIC rút gọn dùng byte budget chung mỗi peer, pacing và recovery flight.
 - Server relay chat/file, USER_LIST phân trang/revision, heartbeat/offline/logout.
-- Client tự nhận file, kiểm tra size/hash, progress, hủy hai chiều; HTTP polling/UI thật.
+- Client tự nhận file, kiểm tra size/hash, progress, chỉ người gửi chủ động hủy; HTTP polling/UI thật.
 - Không còn stub trên đường chạy bắt buộc. `security/cipher.py` dùng thư viện AES-GCM,
   được gọi qua `security/wire.py` để mã hóa TCP/UDP. [Báo cáo Khoa](reports/KHOA_REPORT.md) được giữ nguyên như bàn giao;
   [báo cáo Hải](reports/HAI_REPORT.md) ghi phần ghép và kết quả mạng mới.
@@ -342,11 +342,15 @@ Cửa sổ 3 — client Khoa:
 
 Mở [client Hải](http://127.0.0.1:8000) và [client Khoa](http://127.0.0.1:8001).
 Nhập server `127.0.0.1`, TCP `9000`, username và mật khẩu vừa đặt trên server.
+Server và TCP port được nhớ trong `localStorage` theo từng origin của browser,
+khôi phục khi F5; không lưu username/password/token. Nếu browser chặn storage,
+form vẫn dùng được nhưng cần nhập lại địa chỉ.
 Sau BIND mới có online/chat/file. Chọn `Everyone` để chat chung hoặc username để
 chat riêng/gửi file. Số online tính cả bản thân; dòng `(You)` bị khóa để tránh tự gửi.
 File tự nhận; không cần bấm Accept. Sender chỉ `Completed`
 sau COMPLETE đúng size/hash; byte ACK đến server chưa chứng minh người nhận đã lưu.
-Nút `Cancel` có ở cả phía gửi và nhận khi lượt còn hủy được. File nhận hoàn tất
+Nút `Cancel` chỉ có phía gửi khi lượt còn hủy được. Phía nhận tự xử lý yêu cầu
+hủy từ người gửi và dọn file tạm. File nhận hoàn tất
 có nút `Download`. Ctrl+C đóng từng chương trình.
 
 macOS/Linux dùng `python3 -m venv .venv`, sau đó `.venv/bin/python -m ...` với

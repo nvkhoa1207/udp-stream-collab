@@ -7,6 +7,20 @@ from ui.runtime import ClientRuntime
 
 
 class RuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cancel_command_only_schedules_sender_cancellation(self):
+        runtime = ClientRuntime(Path('.'))
+        runtime.client = AsyncMock(session_id='session')
+        for direction in ('receive', 'invalid'):
+            with self.assertRaisesRegex(ValueError, 'Only the sender'):
+                await runtime.command('cancel', dict(direction=direction, transfer_id='a' * 32))
+        self.assertFalse(runtime.jobs)
+        runtime.client.cancel_receive_file.assert_not_called()
+        runtime.client.cancel_file.assert_not_called()
+        result = await runtime.command('cancel', dict(direction='send', transfer_id='a' * 32))
+        self.assertTrue(result['accepted'])
+        await asyncio.gather(*tuple(runtime.jobs))
+        runtime.client.cancel_file.assert_awaited_once_with('a' * 32)
+
     async def test_collector_records_new_file_before_its_correlated_error(self):
         from types import SimpleNamespace
         runtime = ClientRuntime(Path('.'))

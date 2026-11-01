@@ -1,5 +1,6 @@
 'use strict';
 
+const connectionStorageKey = 'udp-stream-connection';
 const token = document.querySelector('meta[name="client-token"]').content;
 const fileRows = new Map();
 const messageRows = new Map();
@@ -30,6 +31,38 @@ let historyVersion = null;
 
 function getElement(id) {
   return document.getElementById(id);
+}
+
+// Chỉ nhớ địa chỉ kết nối, không lưu username/password/token/khóa.
+function validConnection(settings) {
+  return settings && typeof settings.host === 'string'
+    && settings.host.trim().length > 0 && settings.host.length <= 253
+    && Number.isInteger(settings.port) && settings.port >= 1 && settings.port <= 65535;
+}
+
+function restoreConnection() {
+  try {
+    const settings = JSON.parse(localStorage.getItem(connectionStorageKey));
+    if (validConnection(settings)) {
+      getElement('host').value = settings.host.trim();
+      getElement('port').value = String(settings.port);
+    }
+  } catch {
+    // Storage bị chặn hoặc dữ liệu cũ hỏng: vẫn dùng form bình thường.
+  }
+}
+
+function rememberConnection() {
+  const settings = {
+    host: getElement('host').value.trim(),
+    port: Number(getElement('port').value)
+  };
+  if (!validConnection(settings)) return;
+  try {
+    localStorage.setItem(connectionStorageKey, JSON.stringify(settings));
+  } catch {
+    // Không để lỗi storage làm gián đoạn đăng nhập.
+  }
 }
 
 // Dùng textContent để tên file và tin nhắn luôn được hiển thị như văn bản.
@@ -243,7 +276,7 @@ function createFileRow(event) {
     row.cancelling = true;
     row.button.disabled = true;
     try {
-      await api('/api/cancel', {direction: event.direction, transfer_id: event.transfer_id});
+      await api('/api/cancel', {direction: 'send', transfer_id: event.transfer_id});
     } catch (error) {
       row.warning.textContent = error.message;
     } finally {
@@ -277,7 +310,9 @@ function createFileRow(event) {
   const header = createElement('div', 'file-header');
   header.append(row.peer, row.status);
   const footer = createElement('div', 'file-footer');
-  footer.append(row.details, row.button, row.download);
+  footer.append(row.details);
+  if (event.direction === 'send') footer.append(row.button);
+  footer.append(row.download);
   row.item.append(header, row.name, row.progress, footer, row.warning);
   getElement('files').append(row.item);
   return row;
@@ -292,8 +327,8 @@ function updateFile(event) {
   const bytes = event.direction === 'send' ? event.acknowledged_bytes : event.received_bytes;
   const total = event.total_bytes;
   row.done = terminalStatuses.has(event.status);
-  row.canCancel = !row.done && event.cancel_delivery !== 'pending'
-    && !(event.direction === 'receive' && event.status === 'verifying');
+  row.canCancel = event.direction === 'send' && !row.done
+    && event.cancel_delivery !== 'pending';
   row.transferId = event.transfer_id;
   row.received = event.direction === 'receive' && event.status === 'completed';
   row.name.textContent = event.name || event.transfer_id.slice(0, 8);
@@ -363,13 +398,14 @@ function handleEvent(event) {
 
 async function login(event) {
   event.preventDefault();
+  rememberConnection();
   busy = true;
   updateConnection(false);
   clearError('login');
   try {
     const name = getElement('username').value;
     await api('/api/login', {
-      host: getElement('host').value,
+      host: getElement('host').value.trim(),
       port: Number(getElement('port').value),
       username: name,
       password: getElement('password').value
@@ -506,6 +542,7 @@ async function poll() {
   }
 }
 
+restoreConnection();
 getElement('login').onsubmit = login;
 getElement('logout').onclick = logout;
 getElement('chat').onsubmit = sendMessage;
@@ -521,7 +558,10 @@ getElement('dismiss-error').onclick = async () => {
     showError(error, 'bridge');
   }
 };
-getElement('login').oninput = () => clearError('login');
+getElement('login').oninput = event => {
+  clearError('login');
+  if (event.target.id === 'host' || event.target.id === 'port') rememberConnection();
+};
 getElement('recipient').onchange = () => { updateRecipient(); clearError('file'); };
 getElement('text').oninput = () => { updateByteCount(); clearError('chat'); };
 getElement('file').onchange = () => {

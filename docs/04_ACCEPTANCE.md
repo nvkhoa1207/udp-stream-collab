@@ -1,5 +1,10 @@
 # Nghiệm thu — ghi kết quả thật
 
+**Điều chỉnh UI 01/11/2026:** lưu Server/TCP port qua F5, không lưu password;
+chỉ người gửi chủ động hủy trên UI/HTTP. Kiểm tra Cancel hiện tại: người gửi
+bấm Cancel, người nhận dừng/dọn `.part`, chat và lượt gửi tiếp theo hoạt động.
+Các kết quả hủy hai phía bên dưới là lịch sử, không mô tả nút UI hiện tại.
+
 **Cập nhật 01/11/2026:** AES-GCM TCP/UDP đã chạy 230 test, 20 client/file
 tới 16 MiB và Docker/netem. Kết quả mới ở [08_ENCRYPTION.md](08_ENCRYPTION.md).
 Các bảng ghi ngày 29/10 bên dưới là bằng chứng lịch sử trước mã hóa.

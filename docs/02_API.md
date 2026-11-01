@@ -303,7 +303,10 @@ Quota FileReceiver và quota stream độc lập. Hải triển khai thu hồi b
 stream CLOSED, giữ dấu chống trùng nhỏ đến hết phiên theo protocol mục 6.1.
 Client dispatcher/timer đã ghép; test_team_e2e và network_acceptance kiểm tra file mạng thật.
 
-### Người nhận chủ động hủy file
+### Hủy nhận nội bộ — không cung cấp qua UI/HTTP
+
+Từ 01/11/2026, UI/HTTP chỉ cho người gửi chủ động hủy. API core dưới đây
+được giữ cho test/lifecycle cũ, không phải tính năng người nhận trên giao diện.
 
 - `await cancel_receive_file(transfer_id) -> bool` đưa yêu cầu vào cùng queue
   8 phần tử của worker nhận, không gọi FileReceiver trực tiếp từ UI. Worker
@@ -344,7 +347,7 @@ ui.bridge dùng HTTPServer tuần tự trên 127.0.0.1, socket timeout 10s; core
 trên event loop riêng. Host phải đúng 127.0.0.1:port; POST cần Origin cùng origin
 và X-Client-Token cấp trong HTML, API GET cũng cần token. Không log request/body.
 POST /api/login {host,port,username,password}, /messages {recipient,text},
-/logout {}, /cancel {direction,transfer_id}. POST /api/files?name=...&recipient=...
+/logout {}, /cancel {direction:"send",transfer_id}. Direction khác send bị từ chối. POST /api/files?name=...&recipient=...
 nhận body nhị phân Content-Length tối đa 16 MiB, không cho traversal, dọn upload
 khi job xong/hủy. Chỉ 4 job; event ring 512, GET /api/events?after=N trả events,
 cursor, reset, connected. reset báo cursor cũ bị bỏ, UI phải hiển thị mất lịch sử.

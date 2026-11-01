@@ -194,11 +194,9 @@ class ClientRuntime:
         if action == 'messages':
             return self.send_message(body)
         if action == 'cancel':
-            if body['direction'] == 'receive':
-                method = self.client.cancel_receive_file
-            else:
-                method = self.client.cancel_file
-            return self.start_job(method(body['transfer_id']))
+            if body['direction'] != 'send':
+                raise ValueError('Only the sender can cancel a transfer')
+            return self.start_job(self.client.cancel_file(body['transfer_id']))
         raise ValueError('Invalid command')
 
     async def upload(self, recipient, path, owner=None):

@@ -221,6 +221,10 @@ Quota 4096 và clock/cache được kiểm tra unit; chưa chạy 4096 file qua 
 
 ## 7. File tự động nhận
 
+UI/HTTP hiện chỉ hỗ trợ người gửi chủ động hủy. Phía nhận vẫn xử lý FILE_CANCEL
+từ sender và dọn file tạm; không có nút Cancel phía nhận. Các gói lỗi/hủy phục vụ
+cleanup nội bộ vẫn giữ nguyên trong giao thức.
+
 Mỗi lượt truyền dùng UUID hex thường 32 ký tự làm `transfer_id`; các gói
 META/ACCEPT/CHUNK/END/COMPLETE dùng `stream_id = transfer_id`. Server giữ ID này
 khi relay file; session/seq vẫn thuộc từng chặng. File chỉ gửi riêng đến một
