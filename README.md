@@ -14,8 +14,8 @@ Browser A ↔ HTTP ↔ Client Python A ↔ TCP/UDP ↔ Server ↔ TCP/UDP ↔ Cl
 
 ## 1. Chuẩn bị
 
-Yêu cầu **Python 3.11+**. Docker Desktop chỉ cần khi chạy Docker/netem;
-Node.js chỉ cần khi kiểm thử JavaScript. Chạy mọi lệnh từ thư mục gốc dự án.
+Yêu cầu **Python 3.11+**. Docker Desktop chỉ cần khi chạy server trong container.
+Chạy mọi lệnh từ thư mục gốc dự án.
 
 Nếu chưa có mã nguồn:
 
@@ -122,7 +122,7 @@ Mở browser và đăng nhập:
 Hai máy ở hai nhà khác nhau không tự thuộc cùng LAN; cần mạng/VPN cho phép
 kết nối giữa chúng. HTTP bridge chỉ nghe localhost, không cần mở cổng HTTP ra LAN.
 
-## 4. Docker và netem
+## 4. Chạy server bằng Docker
 
 Mở Docker Desktop, đợi Engine hoạt động. Chuẩn bị `shared.key` trên host theo
 mục 1 và dừng server cũ đang chiếm cổng `9000/9001`.
@@ -136,49 +136,7 @@ docker compose run --rm --service-ports --name btl-server server
 vào `127.0.0.1:9000`. Compose mount khóa read-only; image không chứa khóa.
 Cổng Docker hiện chỉ publish localhost, không dùng trực tiếp cho LAN hai máy.
 
-Kiểm thử mạng xấu tự động:
-
-```bash
-docker compose --profile test run --rm netem
-```
-
-Netem tự tạo server, 10 client và khóa thử trong container; mô phỏng trễ
-20±5 ms, mất gói 7%, trùng 1% và đảo thứ tự. Không cần browser. Chỉ tác động
-loopback trong container, không làm chậm mạng host. Thành công khi kết thúc
-với `"stage": "PASS"` và mã thoát 0.
-
-## 5. Kiểm thử
-
-Sau khi chuẩn bị dependency và khóa, chạy bộ test:
-
-**macOS/Linux:**
-
-```bash
-BTL_NETWORK_TEST=1 .venv/bin/python -m unittest discover -s tests -q
-```
-
-**Windows PowerShell:**
-
-```powershell
-$env:BTL_NETWORK_TEST = '1'
-.\.venv\Scripts\python.exe -m unittest discover -s tests -q
-```
-
-Kiểm thử thêm (Windows thay `.venv/bin/python` bằng `.\.venv\Scripts\python.exe`):
-
-```bash
-.venv/bin/python -m scripts.network_acceptance --clients 20 --sizes 0,1024,1048576,10485760,16777216 --streams 140
-.venv/bin/python -m scripts.network_acceptance --clients 3 --sizes 65536 --streams 2 --loss 0.07 --delay 0.006 --seed 7
-node --test tests/ui_browser.test.cjs
-```
-
-**Kết quả đã ghi nhận ngày 01/11/2026:** 231 test Python và 3 test JavaScript
-đạt; nghiệm thu 20 client/file tới 16 MiB, 140 file nối tiếp và Docker/netem đạt.
-Fault injection Python, netem và loopback một máy là các phạm vi khác nhau;
-chưa ghi nhận nghiệm thu LAN hai máy trong lượt này. Chi tiết ở
-[nghiệm thu](docs/04_ACCEPTANCE.md), [mã hóa](docs/08_ENCRYPTION.md) và [UI](ui/README.md).
-
-## 6. Lỗi thường gặp
+## 5. Lỗi thường gặp
 
 | Hiện tượng | Cách xử lý |
 |---|---|
@@ -191,21 +149,19 @@ chưa ghi nhận nghiệm thu LAN hai máy trong lượt này. Chi tiết ở
 | Server mất kết nối | Chạy lại server, chờ client báo mất phiên rồi bấm Log in; ứng dụng không tự nối lại phiên cũ |
 | `window stalled` khi đang truyền | Kiểm tra server/client nhận và đường mạng; khôi phục kết nối rồi gửi lại file |
 
-## 7. Cấu trúc và tài liệu
+## 6. Cấu trúc mã nguồn
 
 | Thư mục | Nội dung | Phụ trách |
 |---|---|---|
 | `client/`, `ui/` | Client, xử lý file, HTTP bridge và giao diện | Khoa |
 | `server/`, `transport/`, `common/` | Server, giao thức, UDP tin cậy và CUBIC | Hải; hai người thống nhất API |
 | `security/` | AES-GCM và quản lý file khóa | Cả hai |
-| `tests/`, `scripts/`, `mocks/` | Kiểm thử, nghiệm thu và demo | Cả hai |
-| `docs/`, `reports/` | Đặc tả và báo cáo | Cả hai |
-
-[Giao thức](docs/01_PROTOCOL.md) · [API](docs/02_API.md) ·
-[Thiết kế](docs/05_THIET_KE_TONG_THE.md) · [Mã hóa và cách quản lý khóa](docs/08_ENCRYPTION.md)
 
 **Giới hạn:** khóa AES dùng chung trong nhóm tin cậy; server vẫn giải mã để
 chuyển tiếp, không phải E2EE. Chưa có TLS, trao đổi khóa tự động, forward secrecy
 hoặc lớp chống replay mật mã riêng. File trên đĩa không được mã hóa bởi lớp này.
 Phiên/lịch sử hoạt động nằm trong RAM; chưa có đăng ký tài khoản hoặc tiếp tục
-file sau restart. Báo cáo bàn giao cũ có thể mô tả trạng thái trước khi tích hợp.
+file sau restart.
+
+Repository hiện chỉ giữ mã chạy và cấu hình. Test, demo/netem, báo cáo và tài
+liệu phát triển đã được gỡ; có thể xem lại trong lịch sử Git tại commit `445e7af`.
