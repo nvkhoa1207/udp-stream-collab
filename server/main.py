@@ -42,8 +42,8 @@ def main() -> None:
     try:
         get_cipher()  # Kiểm tra khóa trước khi mở server.
         auth = AuthService()
-
-        for username in ("hai", "khoa"):
+        #add user
+        for username in ("hai", "khoa", "user3"):
             password = getpass.getpass(
                 f"Demo password for {username}: "
             )

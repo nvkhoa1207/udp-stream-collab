@@ -63,7 +63,7 @@ Windows:
 .\.venv\Scripts\python.exe -m server.main --host 127.0.0.1 --tcp-port 9000 --udp-port 9001
 ```
 
-Server hỏi mật khẩu cho `hai`, rồi `khoa`. Tự đặt mật khẩu cho mỗi tài khoản;
+Server hỏi mật khẩu lần lượt cho `hai`, `khoa`, `user3`. Tự đặt mật khẩu cho mỗi tài khoản;
 khi gõ không hiện ký tự. Mỗi lần khởi động server sẽ đặt lại mật khẩu demo.
 
 **Terminal 2 — client Hải:**
@@ -99,6 +99,15 @@ Mở browser và đăng nhập:
 | TCP port | `9000` | `9000` |
 | Username | `hai` | `khoa` |
 | Password | Mật khẩu Hải vừa đặt | Mật khẩu Khoa vừa đặt |
+
+Để chạy thêm client thứ ba trên Mac, mở terminal mới:
+
+```bash
+.venv/bin/python -m client.main --http-port 8002 --received-dir data/received-user3
+```
+
+Mở http://127.0.0.1:8002, đăng nhập `user3` bằng mật khẩu đã đặt trên server;
+Server là `127.0.0.1`, TCP port `9000`.
 
 **Không mở cổng `9000` bằng browser:** đó là cổng giao thức TCP của server.
 

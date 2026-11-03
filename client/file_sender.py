@@ -183,7 +183,7 @@ class FileSender:
             self.updates.update(self.transfer_id, message=str(error) or 'Client stopped the transfer')
             raise
         except Exception as error:
-            message = str(error) or ('Timed out during ' + self.phase)
+            message = self._error_message(error)
             self.updates.update(self.transfer_id, message=message)
             raise
         finally:
@@ -194,6 +194,15 @@ class FileSender:
             except asyncio.CancelledError:
                 await cleanup
                 raise
+
+    def _error_message(self, error):
+        # TaskGroup gom lỗi của các chunk; UI cần nguyên nhân bên trong.
+        if isinstance(error, BaseExceptionGroup):
+            messages = dict.fromkeys(self._error_message(item) for item in error.exceptions)
+            return '; '.join(messages)
+        if isinstance(error, TimeoutError):
+            return str(error) or ('Timed out during ' + self.phase)
+        return str(error) or type(error).__name__
 
     async def _finish(self, work, status):
         cancel_delivery = "not_needed"

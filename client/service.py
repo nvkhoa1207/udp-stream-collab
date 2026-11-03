@@ -336,7 +336,7 @@ class ClientService:
         for transfer_id, success in await self._file_io(self.file_offers.take_terminal_streams):
             self._finish_stream(transfer_id, success)
 
-    async def _receive_loop(self) -> None:
+    async def _receive_loop(self) -> None:  # receive packet from transport, check port, transfer
         while True:
             if self._bootstrap_packets:
                 received = self._bootstrap_packets.popleft()
