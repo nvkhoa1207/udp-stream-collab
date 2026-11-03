@@ -33,7 +33,7 @@ class CongestionController:
             raise ValueError('Congestion budget exceeded')
         self.bytes_in_flight += size
         self.sent += 1
-        # Giãn thời gian gửi để không dồn nhiều gói sau một lúc rảnh.
+        # Pacing: Giãn thời gian gửi để tránh dồn dập nhiều gói làm nghẽn mạng.
         spacing = max(0.0001, self.rtt * size / self.cwnd)
         self.next_send = max(self.next_send, self.clock()) + spacing
         return self.sent
@@ -44,6 +44,7 @@ class CongestionController:
         self.bytes_in_flight -= acknowledged_bytes
         self.ack_events += 1
         if rtt_seconds > 0:
+            # RTT estimation (EWMA)
             self.rtt = 0.875 * self.rtt + 0.125 * rtt_seconds
         elapsed = max(0.0, self.clock() - self.epoch)
         # Tính mức cửa sổ mà đường cong CUBIC hướng tới.
@@ -61,12 +62,17 @@ class CongestionController:
         ticket = self.sent if ticket is None else ticket
         if lost_bytes <= 0 or ticket <= self.recovery_until:
             return
+        # recovery_until đảm bảo trong cùng 1 đợt gửi,
+        # dù có mất liên tiếp nhiều gói thì cửa sổ chỉ bị giảm 1 lần duy nhất
         self.recovery_until = self.sent
         self.w_max = self.cwnd
+        # Multiplicative Decrease với β=0.7
         self.cwnd = max(2 * self.mss, 0.7 * self.cwnd)
+        # Tính lại điểm uốn K, thời điểm đạt Wmax
         self.k = ((self.w_max - self.cwnd) / self.mss / 0.4) ** (1 / 3)
         self.epoch = self.clock()
         self.loss_events += 1
 
+    # thu hồi ngân sách khi gói gửi bị hủy hoặc gặp lỗi cục bộ trước khi kịp ra mạng
     def discard(self, size):
         self.bytes_in_flight = max(0, self.bytes_in_flight - size)

@@ -25,6 +25,8 @@ class SessionRegistry:
     def __init__(
         self,
         *,
+        # chỉ có tăng chứ không bao giờ nhảy lùi hay dừng lại
+        # tránh lỗi khi dùng đông hồ hệ thống
         clock: Callable[[], float] = time.monotonic,
         bind_timeout: float = 10.0,
         offline_timeout: float = OFFLINE_TIMEOUT_SECONDS,
@@ -57,6 +59,7 @@ class SessionRegistry:
             raise ValueError("Server session limit reached")
 
         session_id = secrets.token_hex(16)
+        # ktra chống trùng lặp, trùng thì tạo mới
         while session_id in self._sessions:
             session_id = secrets.token_hex(16)
 
@@ -91,18 +94,22 @@ class SessionRegistry:
         if type(port) is not int or not 1 <= port <= 65535:
             raise ValueError("Invalid UDP port")
 
+        # chống giả mạo IP
         if endpoint[0] != session.tcp_ip:
             raise ValueError("UDP IP does not match TCP IP")
 
+        # chống chiếm quyền phiên
         if session.peer is not None and session.peer != endpoint:
             raise ValueError("Session is already bound to another endpoint")
 
+        # chống xung đột cổng
         if any(
             s.peer == endpoint and s.session_id != session_id
             for s in self._sessions.values()
         ):
             raise ValueError("Endpoint is in use by another session")
 
+        # tránh race condition
         self._sessions[session_id] = replace(
             session, peer=endpoint, last_seen=self._clock()
         )
@@ -149,7 +156,7 @@ class SessionRegistry:
         )
 
     def sweep(self) -> list[Session]:
-        """Xóa phiên hết hạn, trả danh sách để dọn kết nối UDP tương ứng."""
+        # Xóa phiên hết hạn, trả danh sách để dọn kết nối UDP tương ứng.
         before = dict(self._sessions)
         self.expire(self._clock())
         return [s for sid, s in before.items() if sid not in self._sessions]

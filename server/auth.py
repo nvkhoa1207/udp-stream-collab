@@ -18,8 +18,10 @@ class PasswordRecord:
 class AuthService:
     def __init__(self) -> None:
         self._accounts: dict[str, PasswordRecord] = {}
-        # Tạo mẫu giả nhanh khi khởi động. Tài khoản không tồn tại vẫn được
-        # tính PBKDF2 trong thread khi kiểm tra mật khẩu.
+        # Tạo mẫu giả nhanh khi khởi động.
+        # Tài khoản không tồn tại vẫn được tính PBKDF2 trong thread 
+        # khi kiểm tra mật khẩu giống với tài khoản đã tồn tại.
+        # Giảm rủi ro lộ thông tin về sự tồn tại của tài khoản.
         self._dummy = PasswordRecord(secrets.token_bytes(16), secrets.token_bytes(32), 600_000)
 
     @staticmethod
@@ -55,8 +57,10 @@ class AuthService:
             return False
 
         account = self._accounts.get(username)
+        # giảm rủi ro timing-based user enumeration
         record = account if account is not None else self._dummy
 
+        # đẩy sang thread riêng để ko bị nghẽn event loop
         digest = await asyncio.to_thread(
             hashlib.pbkdf2_hmac,
             "sha256",
@@ -65,5 +69,6 @@ class AuthService:
             record.iterations,
         )
 
+        # giảm rủi ro rò rỉ thông tin do timing attack
         matches = hmac.compare_digest(digest, record.digest)
         return account is not None and matches
