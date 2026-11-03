@@ -275,6 +275,8 @@ class ServerApp:
             for session in self.sessions.sweep():
                 if self.transport is not None and session.peer is not None:
                     self.router.peer_removed(session)
+                    logger.info("User %s disconnected: session timed out (UDP %s:%s)",
+                                session.username, session.peer[0], session.peer[1])
             if self.router is not None:
                 self.router.publish_users()
                 self.router.expire()
@@ -298,6 +300,8 @@ class ServerApp:
         self.transport._write(peer, Packet(kind=MessageType.BIND_OK,
             sender='server', recipient=session.username, stream_id='control',
             session_id=packet.session_id))
+        if session.peer is None:
+            logger.info("User %s logged in (UDP %s:%s)", session.username, peer[0], peer[1])
         self.router.publish_users()
 
     def _authorize(self, peer, packet):

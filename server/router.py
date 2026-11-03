@@ -2,12 +2,15 @@
 import asyncio
 import hashlib
 import json
+import logging
 import re
 import time
 from dataclasses import dataclass, field, replace
 
 from common.models import MessageType, Packet
 from common.errors import StreamClosedError
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -248,6 +251,7 @@ class Router:
         if packet.kind == MessageType.LOGOUT:
             self.sessions.remove(source.session_id)
             self.peer_removed(source)
+            logger.info("User %s logged out (UDP %s:%s)", source.username, source.peer[0], source.peer[1])
             self.publish_users()
             return
         # C. Chặn việc tự gửi tin hoặc file cho chính mình
