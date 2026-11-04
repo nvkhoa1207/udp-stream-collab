@@ -111,7 +111,7 @@ Server là `127.0.0.1`, TCP port `9000`.
 
 **Không mở cổng `9000` bằng browser:** đó là cổng giao thức TCP của server.
 
-- Chọn **Everyone** để chat chung hoặc một username để chat riêng/gửi file.
+- **Group chat** có ô nhập riêng để gửi tới mọi người. **Private chat** hiển thị tin nhắn riêng; chọn username trong **Recipient** hoặc danh sách online để chat riêng/gửi file.
 - Tin nhắn tối đa **480 byte UTF-8**; file tối đa **16 MiB**, tự nhận vào thư mục đã cấu hình.
 - **Chỉ người gửi chủ động Cancel.** Người nhận xử lý yêu cầu hủy và dọn file tạm.
 - Chờ **Completed** để xác nhận file hoàn tất; 100% byte gửi chưa đủ kết luận.

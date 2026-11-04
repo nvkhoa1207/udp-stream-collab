@@ -112,7 +112,7 @@ function updateConnection(value) {
     getElement(id).disabled = !connected;
   }
   getElement('login-button').disabled = connected || busy;
-  updateSendFile();
+  updateRecipient();
   for (const button of getElement('user-list').querySelectorAll('button')) {
     button.disabled = !connected || button.dataset.username === username;
   }
@@ -122,9 +122,9 @@ function updateConnection(value) {
 }
 
 function updateSendFile() {
-  const everyone = getElement('recipient').value === '*';
-  getElement('send-file').disabled = !connected || uploading || sendingFile || everyone;
-  getElement('file-recipient').textContent = everyone
+  const noRecipient = !getElement('recipient').value;
+  getElement('send-file').disabled = !connected || uploading || sendingFile || noRecipient;
+  getElement('file-recipient').textContent = noRecipient
     ? 'Files are private. Choose one other online user.'
     : sendingFile ? 'Wait for the current file to finish or cancel it first.'
     : 'File recipient: ' + getElement('recipient').value;
@@ -151,7 +151,9 @@ async function api(path, body) {
 
 function updateRecipient() {
   const recipient = getElement('recipient').value;
-  getElement('chat-recipient').textContent = recipient === '*' ? 'To everyone' : 'To ' + recipient;
+  getElement('chat-recipient').textContent = recipient ? 'To ' + recipient : 'Choose a recipient';
+  getElement('private-text').disabled = !connected || !recipient;
+  getElement('send-private-chat').disabled = !connected || !recipient;
   for (const button of getElement('user-list').querySelectorAll('button')) {
     button.setAttribute('aria-pressed', String(button.dataset.username === recipient));
   }
@@ -168,8 +170,11 @@ function updateUsers(users) {
   getElement('user-list').replaceChildren();
   getElement('user-count').textContent = String(users.length);
 
-  for (const name of ['*', ...users]) {
-    const label = name === '*' ? 'Everyone' : name === username ? name + ' (You)' : name;
+  const placeholder = createElement('option', '', 'Choose a user');
+  placeholder.value = '';
+  select.append(placeholder);
+  for (const name of users) {
+    const label = name === username ? name + ' (You)' : name;
     const option = document.createElement('option');
     option.value = name;
     option.textContent = label;
@@ -190,14 +195,14 @@ function updateUsers(users) {
   }
 
   // Giữ người đang chọn nếu người đó vẫn còn trong danh sách.
-  if (selected === '*' || (selected !== username && users.includes(selected))) {
+  if (selected !== username && users.includes(selected)) {
     select.value = selected;
   }
   updateRecipient();
 }
 
-function appendMessage(item) {
-  const messages = getElement('messages');
+function appendMessage(item, listId) {
+  const messages = getElement(listId);
   messages.append(item);
   // Bỏ tin cũ để trang không giữ quá nhiều phần tử khi chạy lâu.
   while (messages.children.length > 513) {
@@ -219,7 +224,7 @@ function showMessage(event) {
   item.append(createElement('span', 'message-body', text));
   messageRows.set(key, {item, meta, details, id: event.id, outgoing});
   updateMessageStatus({...event, message_id: key});
-  appendMessage(item);
+  appendMessage(item, recipient === '*' ? 'messages' : 'private-messages');
 }
 
 function updateMessageStatus(event) {
@@ -229,9 +234,9 @@ function updateMessageStatus(event) {
     ? ' · Failed: ' + event.reason : ' · Send requested');
 }
 
-function updateByteCount() {
-  const size = new TextEncoder().encode(getElement('text').value).length;
-  const counter = getElement('byte-count');
+function updateByteCount(privateChat = false) {
+  const size = new TextEncoder().encode(getElement(privateChat ? 'private-text' : 'text').value).length;
+  const counter = getElement(privateChat ? 'private-byte-count' : 'byte-count');
   counter.textContent = size + ' / 480 UTF-8 bytes';
   counter.classList.toggle('over-limit', size > 480);
 }
@@ -430,21 +435,24 @@ async function logout() {
   }
 }
 
-async function sendMessage(event) {
+async function sendMessage(event, privateChat = false) {
   event.preventDefault();
-  const text = getElement('text').value;
-  const recipient = getElement('recipient').value;
+  const input = getElement(privateChat ? 'private-text' : 'text');
+  const text = input.value;
+  const recipient = privateChat ? getElement('recipient').value : '*';
+  const scope = privateChat ? 'private-chat' : 'chat';
+  if (!connected || !recipient || !text.trim()) return;
   if (new TextEncoder().encode(text).length > 480) {
-    showError('Messages must not exceed 480 UTF-8 bytes.', 'chat');
+    showError('Messages must not exceed 480 UTF-8 bytes.', scope);
     return;
   }
   try {
     await api('/api/messages', {recipient, text});
-    clearError('chat');
-    getElement('text').value = '';
-    updateByteCount();
+    clearError(scope);
+    if (input.value === text) input.value = '';
+    updateByteCount(privateChat);
   } catch (error) {
-    showError(error, 'chat');
+    showError(error, scope);
   }
 }
 
@@ -452,7 +460,7 @@ async function uploadFile(event) {
   event.preventDefault();
   const file = getElement('file').files[0];
   const recipient = getElement('recipient').value;
-  if (!file || recipient === '*') {
+  if (!file || !recipient) {
     showError('Choose a file and one recipient.', 'file');
     return;
   }
@@ -494,12 +502,16 @@ async function poll() {
     const changedAccount = historyVersion !== null && historyVersion !== result.history_version;
     if (changedAccount) {
       getElement('messages').replaceChildren();
+      getElement('private-messages').replaceChildren();
+      getElement('recipient').value = '';
       getElement('files').replaceChildren();
       messageRows.clear();
       fileRows.clear();
       localErrors.clear();
       getElement('text').value = '';
+      getElement('private-text').value = '';
       updateByteCount();
+      updateByteCount(true);
       getElement('file').value = '';
       getElement('selected-file').textContent = 'No file selected';
       getElement('upload-status').textContent = '';
@@ -518,9 +530,11 @@ async function poll() {
       }
     }
     if (!changedAccount && (result.reset || removedMessages)) {
-      const oldNotice = getElement('messages').querySelector('.message-system');
-      if (oldNotice) oldNotice.remove();
-      appendMessage(createElement('li', 'message-system', 'Some older events have expired. Showing the remaining history.'));
+      for (const listId of ['messages', 'private-messages']) {
+        const oldNotice = getElement(listId).querySelector('.message-system');
+        if (oldNotice) oldNotice.remove();
+        appendMessage(createElement('li', 'message-system', 'Some older events have expired. Showing the remaining history.'), listId);
+      }
     }
     for (const event of result.events) {
       handleEvent(event);
@@ -546,6 +560,7 @@ restoreConnection();
 getElement('login').onsubmit = login;
 getElement('logout').onclick = logout;
 getElement('chat').onsubmit = sendMessage;
+getElement('private-chat').onsubmit = event => sendMessage(event, true);
 getElement('upload').onsubmit = uploadFile;
 getElement('dismiss-error').onclick = async () => {
   const ids = serverErrors.map(error => error.id);
@@ -564,6 +579,7 @@ getElement('login').oninput = event => {
 };
 getElement('recipient').onchange = () => { updateRecipient(); clearError('file'); };
 getElement('text').oninput = () => { updateByteCount(); clearError('chat'); };
+getElement('private-text').oninput = () => { updateByteCount(true); clearError('private-chat'); };
 getElement('file').onchange = () => {
   clearError('file');
   const file = getElement('file').files[0];

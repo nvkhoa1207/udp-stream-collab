@@ -48,27 +48,45 @@
           <h2 id="people-heading">Online users</h2>
           <span id="user-count" class="count">0</span>
         </div>
-        <p class="hint">The online count includes you. Choose another user below.</p>
-        <label>Recipient
-          <select id="recipient" disabled><option value="*">Everyone</option></select>
-        </label>
+        <p class="hint">The online count includes you. Choose someone for private chat or file sharing.</p>
         <ul id="user-list" aria-label="Online users"></ul>
-        <p class="hint">Everyone sends a chat message to all other online users.</p>
       </section>
 
       <section class="panel chat-panel" aria-labelledby="chat-heading">
         <div class="section-heading">
-          <h2 id="chat-heading">Chat</h2>
-          <span id="chat-recipient" class="badge">To everyone</span>
+          <h2 id="chat-heading">Group chat</h2>
+          <span class="badge">Everyone</span>
         </div>
-        <ul id="messages" aria-live="polite" aria-label="Messages"></ul>
-        <form id="chat">
+        <p class="hint">Messages here are shared with all other online users.</p>
+        <ul id="messages" class="message-list" aria-live="polite" aria-label="Group messages"></ul>
+        <form id="chat" class="chat-composer">
           <label>Message
             <textarea id="text" rows="3" disabled required aria-describedby="byte-count"></textarea>
           </label>
           <div class="composer-footer">
             <small id="byte-count">0 / 480 UTF-8 bytes</small>
-            <button id="send-chat" type="submit" disabled>Send message</button>
+            <button id="send-chat" type="submit" disabled>Send to everyone</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel chat-panel private-panel" aria-labelledby="private-chat-heading">
+        <div class="section-heading">
+          <h2 id="private-chat-heading">Private chat</h2>
+          <span id="chat-recipient" class="badge">Choose a recipient</span>
+        </div>
+        <p class="hint">Your private messages appear here, separate from group chat.</p>
+        <ul id="private-messages" class="message-list" aria-live="polite" aria-label="Private messages"></ul>
+        <form id="private-chat" class="chat-composer">
+          <label>Recipient
+            <select id="recipient" disabled><option value="">Choose a user</option></select>
+          </label>
+          <label>Private message
+            <textarea id="private-text" rows="3" disabled required aria-describedby="private-byte-count"></textarea>
+          </label>
+          <div class="composer-footer">
+            <small id="private-byte-count">0 / 480 UTF-8 bytes</small>
+            <button id="send-private-chat" type="submit" disabled>Send privately</button>
           </div>
         </form>
       </section>
